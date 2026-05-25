@@ -154,7 +154,8 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       _saved = false;
     });
     try {
-      final data = await EpubService().loadRecipe(page);
+      final path = ref.read(epubPathProvider).value!;
+      final data = await EpubService(path).loadRecipe(page);
       _populateForm(data);
     } catch (e) {
       setState(() => _error = 'Could not load recipe: $e');
@@ -174,8 +175,9 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     setState(() => _saving = true);
 
     try {
+      final path = ref.read(epubPathProvider).value!;
       if (_mode == _Mode.edit) {
-        await EpubService().updateRecipe(
+        await EpubService(path).updateRecipe(
           page: _editingPage!,
           title: _titleCtrl.text.trim(),
           description: _descCtrl.text.trim(),
@@ -184,7 +186,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           footnote: _footnoteCtrl.text.trim(),
         );
       } else {
-        await EpubService().saveRecipe(
+        await EpubService(path).saveRecipe(
           title: _titleCtrl.text.trim(),
           description: _descCtrl.text.trim(),
           ingredientSections: _tables.map((t) => t.toSection()).toList(),
@@ -250,7 +252,22 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                   WidgetStateProperty.all(cs.onPrimaryContainer),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'change') {
+                ref.read(epubPathProvider.notifier).clearPath();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'change',
+                child: Text('Change EPUB file…'),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: pagesAsync.when(

@@ -172,7 +172,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
       _saved = false;
     });
     try {
-      await EpubService().reorderPages(_chapters!);
+      final path = ref.read(epubPathProvider).value!;
+      await EpubService(path).reorderPages(_chapters!);
       ref.invalidate(epubPagesProvider);
       setState(() {
         _saving = false;

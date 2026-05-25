@@ -4,8 +4,9 @@ import 'package:archive/archive.dart';
 import 'models.dart';
 
 class EpubService {
-  static const String epubPath =
-      '/Users/david.hobley/Nextcloud/Calibre Library/David Hobley/Hobley Family Recipes (7752)/Hobley Family Recipes - David Hobley.epub';
+  final String epubPath;
+
+  EpubService(this.epubPath);
 
   Future<List<EpubPage>> loadPages() async {
     final bytes = await File(epubPath).readAsBytes();

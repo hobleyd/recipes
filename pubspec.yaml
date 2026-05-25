@@ -34,6 +34,8 @@ dependencies:
   flutter_riverpod: ^2.6.1
   xml: ^6.5.0
   archive: ^3.6.1
+  shared_preferences: ^2.5.4
+  file_selector: ^1.0.3
 
 dev_dependencies:
   flutter_test:
