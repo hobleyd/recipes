@@ -38,7 +38,7 @@ jobs:
       - run: flutter build linux --release --no-tree-shake-icons --build-number ${{ github.run_number }}
 
       - name: Prepare bundle icon
-        run: cp assets/icon.png build/linux/x64/release/bundle/recipes.png
+        run: convert assets/icon.png -resize 512x512 build/linux/x64/release/bundle/recipes.png
 
       - name: Install Flatpak tooling
         run: |
