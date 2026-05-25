@@ -1,0 +1,52 @@
+name: recipes-macos-ci
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from pubspec.yaml
+        id: version
+        run: |
+          VERSION_FULL=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          BUILD_NAME=${VERSION_FULL%%+*}
+          echo "version=$BUILD_NAME" >> $GITHUB_OUTPUT
+
+      - name: Push version tag
+        uses: EndBug/latest-tag@latest
+        with:
+          tag-name: ${{ steps.version.outputs.version }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: false
+
+      - run: flutter config --enable-macos-desktop
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: flutter test
+      - run: flutter build macos --release --no-tree-shake-icons --build-number ${{ github.run_number }}
+
+      - name: Create DMG
+        uses: lethja/create-dmg-action@v0.0.2
+        with:
+          name: 'recipes'
+          srcdir: 'build/macos/Build/Products/Release/recipes.app'
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v0.1.15
+        with:
+          files: 'recipes.dmg'
+          name: 'recipes-${{ steps.version.outputs.version }}'
+          tag_name: ${{ steps.version.outputs.version }}
