@@ -1,0 +1,99 @@
+name: recipes-linux-ci
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from pubspec.yaml
+        id: version
+        run: |
+          VERSION_FULL=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          BUILD_NAME=${VERSION_FULL%%+*}
+          echo "version=$BUILD_NAME" >> $GITHUB_OUTPUT
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+          cache: false
+
+      - run: sudo apt-get update -y
+      - run: sudo apt-get install -y ninja-build libgtk-3-dev
+
+      - run: flutter config --enable-linux-desktop
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: flutter test
+      - run: flutter build linux --release --no-tree-shake-icons --build-number ${{ github.run_number }}
+
+      - name: Prepare bundle icon
+        run: cp assets/icon.png build/linux/x64/release/bundle/recipes.png
+
+      - name: Install Flatpak tooling
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+
+      - name: Create Flatpak bundle
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          cat > com.example.recipes.yaml <<'EOF'
+          app-id: com.example.recipes
+          runtime: org.freedesktop.Platform
+          runtime-version: '24.08'
+          sdk: org.freedesktop.Sdk
+          command: recipes
+          finish-args:
+            - --share=ipc
+            - --socket=fallback-x11
+            - --socket=wayland
+            - --device=dri
+            - --filesystem=home
+          modules:
+            - name: recipes
+              buildsystem: simple
+              build-commands:
+                - install -Dm755 recipes /app/bin/recipes
+                - cp -r lib /app/lib
+                - cp -r data /app/data
+                - install -Dm644 com.example.recipes.desktop /app/share/applications/com.example.recipes.desktop
+                - install -Dm644 recipes.png /app/share/icons/hicolor/512x512/apps/com.example.recipes.png
+              sources:
+                - type: dir
+                  path: build/linux/x64/release/bundle
+                - type: file
+                  path: com.example.recipes.desktop
+          EOF
+
+          cat > com.example.recipes.desktop <<'EOF'
+          [Desktop Entry]
+          Name=Hobley Family Recipes
+          Exec=recipes
+          Type=Application
+          Categories=Office;
+          Icon=com.example.recipes
+          Terminal=false
+          EOF
+
+          flatpak-builder --force-clean --repo=repo build-dir com.example.recipes.yaml
+          flatpak build-bundle repo recipes-${VERSION}-linux-x86_64.flatpak com.example.recipes
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v0.1.15
+        with:
+          files: 'recipes-${{ steps.version.outputs.version }}-linux-x86_64.flatpak'
+          name: 'recipes-${{ steps.version.outputs.version }}'
+          tag_name: ${{ steps.version.outputs.version }}
