@@ -98,15 +98,16 @@ class MeasurementConverter {
 
   static String? _mlToImperial(double ml) {
     // Prefer largest unit that gives a tidy fraction.
-    // Check pint first for larger volumes.
-    if (ml >= 200) {
+    // Check pint first (¼ pint = 142 ml, so threshold is 100 ml).
+    if (ml >= 100) {
       final qty = ml / 568.261;
       final n = _niceImperial(qty, tol: 0.02);
       if (n != null) return '$n ${qty > 1.001 ? 'pints' : 'pint'}';
     }
+    // Cup tolerance matches tbs/tsp (5%) so common amounts like 60 ml → ¼ cup.
     if (ml >= 50) {
       final qty = ml / 250.0;
-      final n = _niceImperial(qty, tol: 0.02);
+      final n = _niceImperial(qty, tol: 0.05);
       if (n != null) return '$n ${qty > 1.001 ? 'cups' : 'cup'}';
     }
     if (ml <= 90) {
@@ -123,14 +124,16 @@ class MeasurementConverter {
   }
 
   static String? _gToImperial(double g) {
-    if (g <= 285) {
-      final qty = g / 28.3495;
-      final n = _niceImperial(qty, tol: 0.05);
-      if (n != null) return '$n oz';
+    // Try lbs first for anything that maps to a tidy pound fraction.
+    final lbQty = g / 453.592;
+    final lbN = _niceImperial(lbQty, tol: 0.05);
+    if (lbN != null && lbQty >= 0.20) {
+      return '$lbN ${lbQty > 1.001 ? 'lbs' : 'lb'}';
     }
-    final qty = g / 453.592;
-    final n = _niceImperial(qty, tol: 0.03);
-    if (n != null) return '$n ${qty > 1.001 ? 'lbs' : 'lb'}';
+    // Fall back to oz for smaller amounts or when lbs didn't produce a nice match.
+    final ozQty = g / 28.3495;
+    final ozN = _niceImperial(ozQty, tol: 0.05);
+    if (ozN != null) return '$ozN oz';
     return null;
   }
 
