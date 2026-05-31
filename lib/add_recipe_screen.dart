@@ -1,8 +1,10 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'epub_service.dart';
 import 'measurement_converter.dart';
 import 'models.dart';
+import 'ocr_service.dart';
 import 'providers.dart';
 import 'reorder_screen.dart';
 
@@ -101,6 +103,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
 
   bool _saving = false;
   bool _loadingRecipe = false;
+  bool _importing = false;
   String? _error;
   bool _saved = false;
 
@@ -161,6 +164,162 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       setState(() => _error = 'Could not load recipe: $e');
     } finally {
       setState(() => _loadingRecipe = false);
+    }
+  }
+
+  Future<OcrSettings?> _showImportSettings() async {
+    final current =
+        ref.read(ocrSettingsProvider).valueOrNull ?? const OcrSettings();
+
+    var backend = current.preferred;
+    final claudeCtrl = TextEditingController(text: current.claudeApiKey);
+    final urlCtrl = TextEditingController(text: current.ollamaUrl);
+    final modelCtrl = TextEditingController(text: current.ollamaModel);
+
+    final result = await showDialog<OcrSettings>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          title: const Text('Import Settings'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SegmentedButton<OcrBackend>(
+                  segments: const [
+                    ButtonSegment(
+                      value: OcrBackend.ollama,
+                      label: Text('Ollama (local)'),
+                      icon: Icon(Icons.computer_outlined),
+                    ),
+                    ButtonSegment(
+                      value: OcrBackend.claude,
+                      label: Text('Claude API'),
+                      icon: Icon(Icons.cloud_outlined),
+                    ),
+                  ],
+                  selected: {backend},
+                  onSelectionChanged: (s) => setDs(() => backend = s.first),
+                ),
+                const SizedBox(height: 20),
+                if (backend == OcrBackend.ollama) ...[
+                  TextField(
+                    controller: urlCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Ollama URL',
+                      hintText: 'http://localhost:11434',
+                      border: OutlineInputBorder(),
+                      helperText: 'Start Ollama with: ollama serve',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: modelCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Model',
+                      hintText: 'llama3.2-vision',
+                      border: OutlineInputBorder(),
+                      helperText:
+                          'Must be vision-capable. Pull with: ollama pull llama3.2-vision',
+                    ),
+                  ),
+                ] else ...[
+                  TextField(
+                    controller: claudeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Anthropic API key',
+                      hintText: 'sk-ant-…',
+                      border: OutlineInputBorder(),
+                      helperText: 'Get your key at console.anthropic.com',
+                    ),
+                    obscureText: true,
+                    autofocus: current.claudeApiKey.isEmpty,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                OcrSettings(
+                  claudeApiKey: claudeCtrl.text.trim(),
+                  ollamaUrl: urlCtrl.text.trim(),
+                  ollamaModel: modelCtrl.text.trim().isEmpty
+                      ? 'llama3.2-vision'
+                      : modelCtrl.text.trim(),
+                  preferred: backend,
+                ),
+              ),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    claudeCtrl.dispose();
+    urlCtrl.dispose();
+    modelCtrl.dispose();
+
+    if (result != null) {
+      await ref.read(ocrSettingsProvider.notifier).save(result);
+      return result;
+    }
+    return null;
+  }
+
+  Future<void> _importRecipe() async {
+    var settings = ref.read(ocrSettingsProvider).valueOrNull;
+
+    if (settings == null || !settings.isConfigured) {
+      settings = await _showImportSettings();
+      if (settings == null || !settings.isConfigured) return;
+    }
+
+    final typeGroups = [
+      const XTypeGroup(
+        label: 'Images',
+        extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+      ),
+      if (settings.preferred == OcrBackend.claude)
+        const XTypeGroup(label: 'PDF', extensions: ['pdf']),
+    ];
+
+    final file = await openFile(acceptedTypeGroups: typeGroups);
+    if (file == null) return;
+
+    setState(() {
+      _importing = true;
+      _error = null;
+      _saved = false;
+    });
+
+    try {
+      final OcrService service = settings.preferred == OcrBackend.ollama
+          ? OcrService.ollama(
+              baseUrl: settings.ollamaUrl,
+              model: settings.ollamaModel,
+            )
+          : OcrService.claude(settings.claudeApiKey);
+
+      final data = await service.extractRecipe(file.path);
+      setState(() {
+        _mode = _Mode.add;
+        _editingPage = null;
+      });
+      _populateForm(data);
+    } catch (e) {
+      setState(() => _error = 'Import failed: $e');
+    } finally {
+      setState(() => _importing = false);
     }
   }
 
@@ -228,6 +387,19 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                   builder: (_) => const ReorderScreen()),
             ),
           ),
+          IconButton(
+            icon: _importing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.document_scanner_outlined),
+            tooltip: 'Import recipe from image or PDF',
+            onPressed: (_importing || _saving || _loadingRecipe)
+                ? null
+                : _importRecipe,
+          ),
           SegmentedButton<_Mode>(
             segments: const [
               ButtonSegment(
@@ -255,15 +427,21 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           const SizedBox(width: 4),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'change') {
                 ref.read(epubPathProvider.notifier).clearPath();
+              } else if (value == 'import_settings') {
+                await _showImportSettings();
               }
             },
             itemBuilder: (_) => const [
               PopupMenuItem(
                 value: 'change',
                 child: Text('Change EPUB file…'),
+              ),
+              PopupMenuItem(
+                value: 'import_settings',
+                child: Text('Import settings…'),
               ),
             ],
           ),
