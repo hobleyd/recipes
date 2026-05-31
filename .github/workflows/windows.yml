@@ -1,4 +1,4 @@
-name: recipes-windows-ci
+name: recipe-manager-windows-ci
 
 on:
   push:
@@ -35,11 +35,11 @@ jobs:
       - run: flutter build windows --release --no-tree-shake-icons --build-number ${{ github.run_number }}
 
       - name: Create ZIP archive
-        run: Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath 'recipes-${{ steps.version.outputs.version }}-windows.zip'
+        run: Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath 'recipe-manager-${{ steps.version.outputs.version }}-windows.zip'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v0.1.15
         with:
-          files: 'recipes-${{ steps.version.outputs.version }}-windows.zip'
-          name: 'recipes-${{ steps.version.outputs.version }}'
+          files: 'recipe-manager-${{ steps.version.outputs.version }}-windows.zip'
+          name: 'recipe-manager-${{ steps.version.outputs.version }}'
           tag_name: ${{ steps.version.outputs.version }}

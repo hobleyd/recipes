@@ -1,4 +1,4 @@
-name: recipes-macos-ci
+name: recipe-manager-macos-ci
 
 on:
   push:
@@ -41,12 +41,12 @@ jobs:
       - name: Create DMG
         uses: lethja/create-dmg-action@v0.0.2
         with:
-          name: 'recipes'
-          srcdir: 'build/macos/Build/Products/Release/recipes.app'
+          name: 'recipe-manager'
+          srcdir: 'build/macos/Build/Products/Release/Recipe Manager.app'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v0.1.15
         with:
-          files: 'recipes.dmg'
-          name: 'recipes-${{ steps.version.outputs.version }}'
+          files: 'recipe-manager.dmg'
+          name: 'recipe-manager-${{ steps.version.outputs.version }}'
           tag_name: ${{ steps.version.outputs.version }}

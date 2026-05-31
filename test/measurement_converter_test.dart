@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:recipes/measurement_converter.dart';
+import 'package:recipe_manager/measurement_converter.dart';
 
 void main() {
   group('imperialToMetric', () {

@@ -1,4 +1,4 @@
-name: recipes-linux-ci
+name: recipe-manager-linux-ci
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
       - run: flutter build linux --release --no-tree-shake-icons --build-number ${{ github.run_number }}
 
       - name: Prepare bundle icon
-        run: convert assets/icon.png -resize 512x512 build/linux/x64/release/bundle/recipes.png
+        run: convert assets/icon.png -resize 512x512 build/linux/x64/release/bundle/recipe_manager.png
 
       - name: Install Flatpak tooling
         run: |
@@ -50,12 +50,12 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          cat > com.example.recipes.yaml <<'EOF'
-          app-id: com.example.recipes
+          cat > com.example.recipe_manager.yaml <<'EOF'
+          app-id: com.example.recipe_manager
           runtime: org.freedesktop.Platform
           runtime-version: '24.08'
           sdk: org.freedesktop.Sdk
-          command: recipes
+          command: recipe_manager
           finish-args:
             - --share=ipc
             - --socket=fallback-x11
@@ -63,37 +63,37 @@ jobs:
             - --device=dri
             - --filesystem=home
           modules:
-            - name: recipes
+            - name: recipe_manager
               buildsystem: simple
               build-commands:
-                - install -Dm755 recipes /app/bin/recipes
+                - install -Dm755 recipe_manager /app/bin/recipe_manager
                 - cp -r lib /app/lib
                 - cp -r data /app/data
-                - install -Dm644 com.example.recipes.desktop /app/share/applications/com.example.recipes.desktop
-                - install -Dm644 recipes.png /app/share/icons/hicolor/512x512/apps/com.example.recipes.png
+                - install -Dm644 com.example.recipe_manager.desktop /app/share/applications/com.example.recipe_manager.desktop
+                - install -Dm644 recipe_manager.png /app/share/icons/hicolor/512x512/apps/com.example.recipe_manager.png
               sources:
                 - type: dir
                   path: build/linux/x64/release/bundle
                 - type: file
-                  path: com.example.recipes.desktop
+                  path: com.example.recipe_manager.desktop
           EOF
 
-          cat > com.example.recipes.desktop <<'EOF'
+          cat > com.example.recipe_manager.desktop <<'EOF'
           [Desktop Entry]
-          Name=Hobley Family Recipes
-          Exec=recipes
+          Name=Recipe Manager
+          Exec=recipe_manager
           Type=Application
           Categories=Office;
-          Icon=com.example.recipes
+          Icon=com.example.recipe_manager
           Terminal=false
           EOF
 
-          flatpak-builder --force-clean --repo=repo build-dir com.example.recipes.yaml
-          flatpak build-bundle repo recipes-${VERSION}-linux-x86_64.flatpak com.example.recipes
+          flatpak-builder --force-clean --repo=repo build-dir com.example.recipe_manager.yaml
+          flatpak build-bundle repo recipe-manager-${VERSION}-linux-x86_64.flatpak com.example.recipe_manager
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v0.1.15
         with:
-          files: 'recipes-${{ steps.version.outputs.version }}-linux-x86_64.flatpak'
-          name: 'recipes-${{ steps.version.outputs.version }}'
+          files: 'recipe-manager-${{ steps.version.outputs.version }}-linux-x86_64.flatpak'
+          name: 'recipe-manager-${{ steps.version.outputs.version }}'
           tag_name: ${{ steps.version.outputs.version }}
