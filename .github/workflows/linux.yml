@@ -50,8 +50,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          cat > com.example.recipe_manager.yaml <<'EOF'
-          app-id: com.example.recipe_manager
+          cat > au.com.sharpblue.recipe_manager.yaml <<'EOF'
+          app-id: au.com.sharpblue.recipe_manager
           runtime: org.freedesktop.Platform
           runtime-version: '24.08'
           sdk: org.freedesktop.Sdk
@@ -69,27 +69,27 @@ jobs:
                 - install -Dm755 recipe_manager /app/bin/recipe_manager
                 - cp -r lib /app/lib
                 - cp -r data /app/data
-                - install -Dm644 com.example.recipe_manager.desktop /app/share/applications/com.example.recipe_manager.desktop
-                - install -Dm644 recipe_manager.png /app/share/icons/hicolor/512x512/apps/com.example.recipe_manager.png
+                - install -Dm644 au.com.sharpblue.recipe_manager.desktop /app/share/applications/au.com.sharpblue.recipe_manager.desktop
+                - install -Dm644 recipe_manager.png /app/share/icons/hicolor/512x512/apps/au.com.sharpblue.recipe_manager.png
               sources:
                 - type: dir
                   path: build/linux/x64/release/bundle
                 - type: file
-                  path: com.example.recipe_manager.desktop
+                  path: au.com.sharpblue.recipe_manager.desktop
           EOF
 
-          cat > com.example.recipe_manager.desktop <<'EOF'
+          cat > au.com.sharpblue.recipe_manager.desktop <<'EOF'
           [Desktop Entry]
           Name=Recipe Manager
           Exec=recipe_manager
           Type=Application
           Categories=Office;
-          Icon=com.example.recipe_manager
+          Icon=au.com.sharpblue.recipe_manager
           Terminal=false
           EOF
 
-          flatpak-builder --force-clean --repo=repo build-dir com.example.recipe_manager.yaml
-          flatpak build-bundle repo recipe-manager-${VERSION}-linux-x86_64.flatpak com.example.recipe_manager
+          flatpak-builder --force-clean --repo=repo build-dir au.com.sharpblue.recipe_manager.yaml
+          flatpak build-bundle repo recipe-manager-${VERSION}-linux-x86_64.flatpak au.com.sharpblue.recipe_manager
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v0.1.15
