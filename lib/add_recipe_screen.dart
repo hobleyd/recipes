@@ -550,13 +550,19 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           SegmentedButton<_Mode>(
             segments: const [
               ButtonSegment(
-                  value: _Mode.add,
-                  label: Text('Add'),
-                  icon: Icon(Icons.add)),
+                value: _Mode.add,
+                icon: Tooltip(
+                  message: 'Add recipe',
+                  child: Icon(Icons.add),
+                ),
+              ),
               ButtonSegment(
-                  value: _Mode.edit,
-                  label: Text('Edit'),
-                  icon: Icon(Icons.edit_outlined)),
+                value: _Mode.edit,
+                icon: Tooltip(
+                  message: 'Edit recipe',
+                  child: Icon(Icons.edit_outlined),
+                ),
+              ),
             ],
             selected: {_mode},
             onSelectionChanged: (modes) => setState(() {
