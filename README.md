@@ -1,4 +1,4 @@
-# Hobley Family Recipes
+# Recipe Manager
 
 A Flutter desktop app for managing a personal recipe ebook. It reads and writes a local EPUB file directly, letting you add new recipes, edit existing ones, and reorganise chapters — without needing a separate ebook editor.
 

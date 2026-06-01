@@ -527,27 +527,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
         foregroundColor: cs.onPrimaryContainer,
         actions: [
           IconButton(
-            icon: const Icon(Icons.sort),
-            tooltip: 'Reorder pages & chapters',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const ReorderScreen()),
-            ),
-          ),
-          IconButton(
-            icon: _importing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.document_scanner_outlined),
-            tooltip: 'Import recipe from image or PDF',
-            onPressed: (_importing || _saving || _loadingRecipe)
-                ? null
-                : _importRecipe,
-          ),
-          IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'Add recipe',
             style: _mode == _Mode.add
@@ -578,6 +557,27 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
               _error = null;
               _saved = false;
             }),
+          ),
+          IconButton(
+            icon: _importing
+                ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+                : const Icon(Icons.document_scanner_outlined),
+            tooltip: 'Import recipe from image or PDF',
+            onPressed: (_importing || _saving || _loadingRecipe)
+                ? null
+                : _importRecipe,
+          ),
+          IconButton(
+            icon: const Icon(Icons.sort),
+            tooltip: 'Reorder pages & chapters',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => const ReorderScreen()),
+            ),
           ),
           const SizedBox(width: 4),
           PopupMenuButton<String>(
