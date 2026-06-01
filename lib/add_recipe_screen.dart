@@ -547,35 +547,37 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                 ? null
                 : _importRecipe,
           ),
-          SegmentedButton<_Mode>(
-            segments: const [
-              ButtonSegment(
-                value: _Mode.add,
-                icon: Tooltip(
-                  message: 'Add recipe',
-                  child: Icon(Icons.add),
-                ),
-              ),
-              ButtonSegment(
-                value: _Mode.edit,
-                icon: Tooltip(
-                  message: 'Edit recipe',
-                  child: Icon(Icons.edit_outlined),
-                ),
-              ),
-            ],
-            selected: {_mode},
-            onSelectionChanged: (modes) => setState(() {
-              _mode = modes.first;
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Add recipe',
+            style: _mode == _Mode.add
+                ? IconButton.styleFrom(
+                    backgroundColor:
+                        cs.onPrimaryContainer.withValues(alpha: 0.15))
+                : null,
+            onPressed: () => setState(() {
+              _mode = _Mode.add;
               _insertAfter = null;
               _editingPage = null;
               _error = null;
               _saved = false;
             }),
-            style: ButtonStyle(
-              foregroundColor:
-                  WidgetStateProperty.all(cs.onPrimaryContainer),
-            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit recipe',
+            style: _mode == _Mode.edit
+                ? IconButton.styleFrom(
+                    backgroundColor:
+                        cs.onPrimaryContainer.withValues(alpha: 0.15))
+                : null,
+            onPressed: () => setState(() {
+              _mode = _Mode.edit;
+              _insertAfter = null;
+              _editingPage = null;
+              _error = null;
+              _saved = false;
+            }),
           ),
           const SizedBox(width: 4),
           PopupMenuButton<String>(
