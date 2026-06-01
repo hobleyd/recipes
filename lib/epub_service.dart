@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:archive/archive.dart';
 import 'models.dart';
 
@@ -1053,15 +1054,238 @@ $methodHtml</body>
     return _escXml(text);
   }
 
-  String _escXml(String t) => t
+  static String _escXml(String t) => t
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
 
-  String _unescXml(String t) => t
+  static String _unescXml(String t) => t
       .replaceAll('&amp;', '&')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"');
+
+  // ── Create new cookbook ────────────────────────────────────────────────────
+
+  static Future<void> createCookbook({
+    required String path,
+    required String title,
+    String? coverImagePath,
+  }) async {
+    final uuid = _generateUuid();
+    final titleEsc = _escXml(title);
+    final fileMap = <String, List<int>>{};
+
+    String? imageHref;
+    String? imageMimeType;
+    if (coverImagePath != null) {
+      final ext = coverImagePath.split('.').last.toLowerCase();
+      final safeExt = ext == 'jpeg' ? 'jpg' : ext;
+      imageMimeType = safeExt == 'png' ? 'image/png' : 'image/jpeg';
+      imageHref = 'Images/cover.$safeExt';
+      fileMap['OEBPS/$imageHref'] = await File(coverImagePath).readAsBytes();
+    }
+
+    fileMap['META-INF/container.xml'] = utf8.encode(
+      '<?xml version="1.0" encoding="UTF-8"?>\n'
+      '<container version="1.0" xmlns="urn:oasis:schemas:container">\n'
+      '  <rootfiles>\n'
+      '    <rootfile full-path="OEBPS/content.opf"'
+      ' media-type="application/oebps-package+xml"/>\n'
+      '  </rootfiles>\n'
+      '</container>',
+    );
+
+    final imageManifestItem = imageHref != null
+        ? '    <item id="cover_image" href="$imageHref"'
+            ' media-type="$imageMimeType"/>\n'
+        : '';
+
+    fileMap['OEBPS/content.opf'] = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>\n'
+      '<package xmlns="http://www.idpf.org/2007/opf" version="2.0"'
+      ' unique-identifier="bookid">\n'
+      '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"'
+      ' xmlns:opf="http://www.idpf.org/2007/opf">\n'
+      '    <dc:title>$titleEsc</dc:title>\n'
+      '    <dc:language>en</dc:language>\n'
+      '    <dc:identifier id="bookid">urn:uuid:$uuid</dc:identifier>\n'
+      '  </metadata>\n'
+      '  <manifest>\n'
+      '    <item id="ncx" href="toc.ncx"'
+      ' media-type="application/x-dtbncx+xml"/>\n'
+      '    <item id="page_styles.css" href="Styles/page_styles.css"'
+      ' media-type="text/css"/>\n'
+      '    <item id="stylesheet.css" href="Styles/stylesheet.css"'
+      ' media-type="text/css"/>\n'
+      '    <item id="titlepage.xhtml" href="Text/titlepage.xhtml"'
+      ' media-type="application/xhtml+xml"/>\n'
+      '    <item id="index_split_001.xhtml"'
+      ' href="Text/index_split_001.xhtml"'
+      ' media-type="application/xhtml+xml"/>\n'
+      '    <item id="attributions.xhtml" href="Text/attributions.xhtml"'
+      ' media-type="application/xhtml+xml"/>\n'
+      '$imageManifestItem'
+      '  </manifest>\n'
+      '  <spine toc="ncx">\n'
+      '    <itemref idref="titlepage.xhtml"/>\n'
+      '    <itemref idref="index_split_001.xhtml"/>\n'
+      '    <itemref idref="attributions.xhtml"/>\n'
+      '  </spine>\n'
+      '</package>',
+    );
+
+    fileMap['OEBPS/toc.ncx'] = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>\n'
+      '<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN"\n'
+      '  "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">\n'
+      '<ncx version="2005-1"'
+      ' xmlns="http://www.daisy.org/z3986/2005/ncx/">\n'
+      '  <head>\n'
+      '    <meta name="dtb:uid" content="urn:uuid:$uuid"/>\n'
+      '    <meta name="dtb:depth" content="1"/>\n'
+      '    <meta name="dtb:totalPageCount" content="0"/>\n'
+      '    <meta name="dtb:maxPageNumber" content="0"/>\n'
+      '  </head>\n'
+      '  <docTitle><text>$titleEsc</text></docTitle>\n'
+      '  <navMap>\n'
+      '    <navPoint id="utitlepage" playOrder="1">\n'
+      '      <navLabel><text>$titleEsc</text></navLabel>\n'
+      '      <content src="Text/titlepage.xhtml"/>\n'
+      '    </navPoint>\n'
+      '    <navPoint id="uindex" playOrder="2">\n'
+      '      <navLabel><text>Contents</text></navLabel>\n'
+      '      <content src="Text/index_split_001.xhtml"/>\n'
+      '    </navPoint>\n'
+      '  </navMap>\n'
+      '</ncx>',
+    );
+
+    final titlepageBody = imageHref != null
+        ? '  <div class="title-page">\n'
+            '    <img src="../$imageHref" alt="$titleEsc"'
+            ' class="cover-image"/>\n'
+            '  </div>'
+        : '  <h1 class="title">$titleEsc</h1>';
+
+    fileMap['OEBPS/Text/titlepage.xhtml'] = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>\n'
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"\n'
+      '  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
+      '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+      '<head>\n'
+      '  <title>$titleEsc</title>\n'
+      '  <link href="../Styles/page_styles.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '  <link href="../Styles/stylesheet.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '</head>\n'
+      '<body>\n'
+      '$titlepageBody\n'
+      '</body>\n'
+      '</html>',
+    );
+
+    fileMap['OEBPS/Text/index_split_001.xhtml'] = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>\n'
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"\n'
+      '  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
+      '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+      '<head>\n'
+      '  <title>$titleEsc</title>\n'
+      '  <link href="../Styles/page_styles.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '  <link href="../Styles/stylesheet.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '</head>\n'
+      '<body>\n'
+      '  <p class="p-p1"><b>$titleEsc</b></p>\n'
+      '  <p>&#160;</p>\n'
+      '</body>\n'
+      '</html>',
+    );
+
+    fileMap['OEBPS/Text/attributions.xhtml'] = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>\n'
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"\n'
+      '  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
+      '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+      '<head>\n'
+      '  <title>Sources</title>\n'
+      '  <link href="../Styles/page_styles.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '  <link href="../Styles/stylesheet.css" rel="stylesheet"'
+      ' type="text/css"/>\n'
+      '</head>\n'
+      '<body>\n'
+      '  <h2 class="recipe-title">Sources</h2>\n'
+      '</body>\n'
+      '</html>',
+    );
+
+    fileMap['OEBPS/Styles/page_styles.css'] = utf8.encode(
+      '@charset "utf-8";\n\n'
+      'body {\n'
+      '  font-family: Georgia, serif;\n'
+      '  margin: 5%;\n'
+      '  font-size: 1em;\n'
+      '  line-height: 1.5;\n'
+      '}\n',
+    );
+
+    fileMap['OEBPS/Styles/stylesheet.css'] = utf8.encode(
+      '@charset "utf-8";\n\n'
+      'h1.title { font-size: 2em; text-align: center; margin: 2em 0; }\n'
+      'h2.recipe-title { font-size: 1.4em; margin-top: 1.5em;'
+      ' border-bottom: 1px solid #ccc; padding-bottom: 0.2em; }\n'
+      'h3.recipe-part { font-size: 1.1em; margin-top: 1em;'
+      ' font-style: italic; }\n'
+      'table.recipe-table { width: 100%; border-collapse: collapse;'
+      ' margin: 0.5em 0 1em 0; font-size: 0.9em; }\n'
+      'table.recipe-table th { background-color: #f5f5f5; padding: 4px 6px;'
+      ' text-align: left; font-weight: bold;'
+      ' border-bottom: 2px solid #ddd; }\n'
+      'table.recipe-table td { padding: 3px 6px;'
+      ' border-bottom: 1px solid #eee; vertical-align: top; }\n'
+      '.col-ingredients { width: 38%; }\n'
+      '.col-measure { width: 12%; text-align: center; }\n'
+      'p.footnote { font-size: 0.85em; font-style: italic; }\n'
+      '.calibre1 { color: inherit; text-decoration: none; }\n'
+      '.calibre2 { vertical-align: super; font-size: 0.75em; }\n'
+      '.calibre8 { color: inherit; text-decoration: none; }\n'
+      'a.citation { color: inherit; text-decoration: none; }\n'
+      'p.p-p1 { font-size: 1.3em; font-weight: bold;'
+      ' margin-bottom: 0.5em; }\n'
+      'p.p-p2 { font-size: 1.1em; margin-left: 1.5em;'
+      ' margin-top: 0.3em; }\n'
+      'p.p-p3 { margin-left: 3em; margin-top: 0.1em;'
+      ' font-size: 0.95em; }\n'
+      '.cover-image { display: block; max-width: 100%; margin: 0 auto; }\n'
+      'div.title-page { text-align: center; margin-top: 2em; }\n',
+    );
+
+    final newArchive = Archive();
+    final mimetypeBytes = utf8.encode('application/epub+zip');
+    final mf = ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
+    mf.compress = false;
+    newArchive.addFile(mf);
+    for (final entry in fileMap.entries) {
+      newArchive.addFile(
+          ArchiveFile(entry.key, entry.value.length, entry.value));
+    }
+    await File(path).writeAsBytes(ZipEncoder().encode(newArchive)!);
+  }
+
+  static String _generateUuid() {
+    final b = List.generate(16, (_) => Random.secure().nextInt(256));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    String hex(int n) => n.toRadixString(16).padLeft(2, '0');
+    return '${hex(b[0])}${hex(b[1])}${hex(b[2])}${hex(b[3])}'
+        '-${hex(b[4])}${hex(b[5])}'
+        '-${hex(b[6])}${hex(b[7])}'
+        '-${hex(b[8])}${hex(b[9])}'
+        '-${hex(b[10])}${hex(b[11])}${hex(b[12])}${hex(b[13])}${hex(b[14])}${hex(b[15])}';
+  }
 }
