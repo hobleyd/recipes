@@ -8,7 +8,7 @@
 PRODUCT_NAME = Recipe Manager
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = au.com.sharpblue.recipe_manager
+PRODUCT_BUNDLE_IDENTIFIER = au.com.sharpblue.recipe-manager
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 au.com.sharpblue. All rights reserved.

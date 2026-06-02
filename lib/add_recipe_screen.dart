@@ -169,7 +169,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
 
   Future<OcrSettings?> _showImportSettings() async {
     final current =
-        ref.read(ocrSettingsProvider).valueOrNull ?? const OcrSettings();
+        ref.read(ocrSettingsProvider).value ?? const OcrSettings();
 
     var backend = current.preferred;
     final claudeCtrl = TextEditingController(text: current.claudeApiKey);
@@ -277,7 +277,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   }
 
   Future<void> _importRecipe() async {
-    var settings = ref.read(ocrSettingsProvider).valueOrNull;
+    var settings = ref.read(ocrSettingsProvider).value;
 
     if (settings == null || !settings.isConfigured) {
       settings = await _showImportSettings();
@@ -521,8 +521,8 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_mode == _Mode.edit
-            ? 'Edit Recipe — Hobley Family Recipes'
-            : 'Add Recipe — Hobley Family Recipes'),
+            ? 'Edit Recipe — Recipe Manager'
+            : 'Add Recipe — Recipe Manager'),
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
         actions: [

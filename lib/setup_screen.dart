@@ -19,7 +19,7 @@ class SetupScreen extends ConsumerWidget {
             Icon(Icons.menu_book_outlined, size: 72, color: cs.primary),
             const SizedBox(height: 24),
             Text(
-              'Hobley Family Recipes',
+              'Recipe Manager',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 8),

@@ -194,7 +194,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reorder — Hobley Family Recipes'),
+        title: const Text('Reorder — Recipe Manager'),
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
         actions: [

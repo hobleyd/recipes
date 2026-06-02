@@ -231,7 +231,7 @@ class EpubService {
     final mimetypeBytes = fileMap.remove('mimetype');
     if (mimetypeBytes != null) {
       final mf = ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
-      mf.compress = false;
+      mf.compression = CompressionType.none;
       newArchive.addFile(mf);
     }
     for (final entry in fileMap.entries) {
@@ -251,7 +251,7 @@ class EpubService {
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Hobley Family Recipes</title>
+  <title>Recipe Manager</title>
   <link href="../Styles/page_styles.css" rel="stylesheet" type="text/css"/>
   <link href="../Styles/stylesheet.css" rel="stylesheet" type="text/css"/>
 </head>
@@ -286,7 +286,7 @@ class EpubService {
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Hobley Family Recipes</title>
+  <title>Recipe Manager</title>
   <link href="../Styles/page_styles.css" rel="stylesheet" type="text/css"/>
   <link href="../Styles/stylesheet.css" rel="stylesheet" type="text/css"/>
 </head>
@@ -683,7 +683,7 @@ $methodHtml</body>
     if (mimetypeBytes != null) {
       final mf =
           ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
-      mf.compress = false;
+      mf.compression = CompressionType.none;
       newArchive.addFile(mf);
     }
     for (final entry in fileMap.entries) {
@@ -771,7 +771,7 @@ $methodHtml</body>
     if (mimetypeBytes != null) {
       final mf =
           ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
-      mf.compress = false;
+      mf.compression = CompressionType.none;
       newArchive.addFile(mf);
     }
     for (final entry in fileMap.entries) {
@@ -1268,7 +1268,7 @@ $methodHtml</body>
     final newArchive = Archive();
     final mimetypeBytes = utf8.encode('application/epub+zip');
     final mf = ArchiveFile('mimetype', mimetypeBytes.length, mimetypeBytes);
-    mf.compress = false;
+    mf.compression = CompressionType.none;
     newArchive.addFile(mf);
     for (final entry in fileMap.entries) {
       newArchive.addFile(
