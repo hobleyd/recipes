@@ -174,94 +174,192 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     var backend = current.preferred;
     final claudeCtrl = TextEditingController(text: current.claudeApiKey);
     final urlCtrl = TextEditingController(text: current.ollamaUrl);
+    String selectedModel = current.ollamaModel;
     final modelCtrl = TextEditingController(text: current.ollamaModel);
+
+    List<String>? ollamaModels;
+    bool loadingModels = false;
+
+    if (backend == OcrBackend.ollama) {
+      try {
+        ollamaModels = await OcrService.fetchOllamaModels(current.ollamaUrl)
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+    }
+
+    if (!mounted) return null;
 
     final result = await showDialog<OcrSettings>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDs) => AlertDialog(
-          title: const Text('Import Settings'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 460),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SegmentedButton<OcrBackend>(
-                  segments: const [
-                    ButtonSegment(
-                      value: OcrBackend.ollama,
-                      label: Text('Ollama (local)'),
-                      icon: Icon(Icons.computer_outlined),
+        builder: (ctx, setDs) {
+          void fetchModels() {
+            setDs(() => loadingModels = true);
+            OcrService.fetchOllamaModels(urlCtrl.text.trim())
+                .timeout(const Duration(seconds: 5))
+                .then((models) {
+              if (!ctx.mounted) return;
+              setDs(() {
+                ollamaModels = models;
+                loadingModels = false;
+                if (models.isNotEmpty && !models.contains(selectedModel)) {
+                  selectedModel = models.first;
+                  modelCtrl.text = selectedModel;
+                }
+              });
+            }).catchError((_) {
+              if (!ctx.mounted) return;
+              setDs(() {
+                ollamaModels = null;
+                loadingModels = false;
+              });
+            });
+          }
+
+          final hasModels = ollamaModels != null && ollamaModels!.isNotEmpty;
+
+          return AlertDialog(
+            title: const Text('Import Settings'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 460),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SegmentedButton<OcrBackend>(
+                    segments: const [
+                      ButtonSegment(
+                        value: OcrBackend.ollama,
+                        label: Text('Ollama (local)'),
+                        icon: Icon(Icons.computer_outlined),
+                      ),
+                      ButtonSegment(
+                        value: OcrBackend.claude,
+                        label: Text('Claude API'),
+                        icon: Icon(Icons.cloud_outlined),
+                      ),
+                    ],
+                    selected: {backend},
+                    onSelectionChanged: (s) {
+                      setDs(() => backend = s.first);
+                      if (s.first == OcrBackend.ollama &&
+                          ollamaModels == null &&
+                          !loadingModels) {
+                        fetchModels();
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  if (backend == OcrBackend.ollama) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: urlCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Ollama URL',
+                              hintText: 'http://localhost:11434',
+                              border: OutlineInputBorder(),
+                              helperText: 'Start Ollama with: ollama serve',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: IconButton(
+                            onPressed: loadingModels ? null : fetchModels,
+                            tooltip: 'Fetch available models',
+                            icon: loadingModels
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.refresh),
+                          ),
+                        ),
+                      ],
                     ),
-                    ButtonSegment(
-                      value: OcrBackend.claude,
-                      label: Text('Claude API'),
-                      icon: Icon(Icons.cloud_outlined),
+                    const SizedBox(height: 12),
+                    if (hasModels)
+                      DropdownButtonFormField<String>(
+                        // ignore: deprecated_member_use
+                        value: ollamaModels!.contains(selectedModel)
+                            ? selectedModel
+                            : ollamaModels!.first,
+                        decoration: const InputDecoration(
+                          labelText: 'Model',
+                          border: OutlineInputBorder(),
+                          helperText: 'Select a vision-capable model',
+                        ),
+                        isExpanded: true,
+                        items: ollamaModels!
+                            .map((m) =>
+                                DropdownMenuItem(value: m, child: Text(m)))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setDs(() {
+                              selectedModel = v;
+                              modelCtrl.text = v;
+                            });
+                          }
+                        },
+                      )
+                    else
+                      TextField(
+                        controller: modelCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Model',
+                          hintText: 'llama3.2-vision',
+                          border: const OutlineInputBorder(),
+                          helperText: loadingModels
+                              ? 'Fetching models…'
+                              : 'Must be vision-capable. Pull with: ollama pull llama3.2-vision',
+                        ),
+                        onChanged: (v) => selectedModel = v,
+                      ),
+                  ] else ...[
+                    TextField(
+                      controller: claudeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Anthropic API key',
+                        hintText: 'sk-ant-…',
+                        border: OutlineInputBorder(),
+                        helperText: 'Get your key at console.anthropic.com',
+                      ),
+                      obscureText: true,
+                      autofocus: current.claudeApiKey.isEmpty,
                     ),
                   ],
-                  selected: {backend},
-                  onSelectionChanged: (s) => setDs(() => backend = s.first),
-                ),
-                const SizedBox(height: 20),
-                if (backend == OcrBackend.ollama) ...[
-                  TextField(
-                    controller: urlCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Ollama URL',
-                      hintText: 'http://localhost:11434',
-                      border: OutlineInputBorder(),
-                      helperText: 'Start Ollama with: ollama serve',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: modelCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Model',
-                      hintText: 'llama3.2-vision',
-                      border: OutlineInputBorder(),
-                      helperText:
-                          'Must be vision-capable. Pull with: ollama pull llama3.2-vision',
-                    ),
-                  ),
-                ] else ...[
-                  TextField(
-                    controller: claudeCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Anthropic API key',
-                      hintText: 'sk-ant-…',
-                      border: OutlineInputBorder(),
-                      helperText: 'Get your key at console.anthropic.com',
-                    ),
-                    obscureText: true,
-                    autofocus: current.claudeApiKey.isEmpty,
-                  ),
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(
-                ctx,
-                OcrSettings(
-                  claudeApiKey: claudeCtrl.text.trim(),
-                  ollamaUrl: urlCtrl.text.trim(),
-                  ollamaModel: modelCtrl.text.trim().isEmpty
-                      ? 'llama3.2-vision'
-                      : modelCtrl.text.trim(),
-                  preferred: backend,
-                ),
               ),
-              child: const Text('Save'),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  ctx,
+                  OcrSettings(
+                    claudeApiKey: claudeCtrl.text.trim(),
+                    ollamaUrl: urlCtrl.text.trim(),
+                    ollamaModel: selectedModel.trim().isEmpty
+                        ? 'llama3.2-vision'
+                        : selectedModel.trim(),
+                    preferred: backend,
+                  ),
+                ),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -659,9 +757,11 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                     ),
                     isExpanded: true,
                     items: _buildPageItems(pages),
-                    selectedItemBuilder: (_) => pages
-                        .map((p) => Text(p.title,
-                            overflow: TextOverflow.ellipsis))
+                    selectedItemBuilder: (_) => _buildPageItems(pages)
+                        .map((item) => item.value?.id.isEmpty ?? true
+                            ? const SizedBox.shrink()
+                            : Text(item.value!.title,
+                                overflow: TextOverflow.ellipsis))
                         .toList(),
                     onChanged: (p) => setState(() => _insertAfter = p),
                     validator: (v) =>
@@ -680,9 +780,11 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                     ),
                     isExpanded: true,
                     items: _buildPageItems(pages),
-                    selectedItemBuilder: (_) => pages
-                        .map((p) => Text(p.title,
-                            overflow: TextOverflow.ellipsis))
+                    selectedItemBuilder: (_) => _buildPageItems(pages)
+                        .map((item) => item.value?.id.isEmpty ?? true
+                            ? const SizedBox.shrink()
+                            : Text(item.value!.title,
+                                overflow: TextOverflow.ellipsis))
                         .toList(),
                     onChanged: (p) {
                       setState(() => _editingPage = p);

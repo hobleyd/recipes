@@ -30,6 +30,23 @@ abstract class OcrService {
       _OllamaOcrService;
 
   Future<RecipeData> extractRecipe(String filePath);
+
+  static Future<List<String>> fetchOllamaModels(String baseUrl) async {
+    final base =
+        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final response = await http
+        .get(Uri.parse('$base/api/tags'))
+        .timeout(const Duration(seconds: 5));
+    if (response.statusCode != 200) {
+      throw Exception('Ollama returned ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final models = (data['models'] as List?) ?? [];
+    return models
+        .map((m) => (m['name'] as String?) ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
