@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
           cache: false
 
       - run: sudo apt-get update -y
-      - run: sudo apt-get install -y ninja-build libgtk-3-dev imagemagick
+      - run: sudo apt-get install -y ninja-build libgtk-3-dev binutils coreutils desktop-file-utils fakeroot libgdk-pixbuf2.0-dev patchelf util-linux imagemagick
 
       - run: flutter config --enable-linux-desktop
       - run: flutter pub get
@@ -37,63 +37,44 @@ jobs:
       - run: flutter test
       - run: flutter build linux --release --no-tree-shake-icons --build-number ${{ github.run_number }}
 
-      - name: Prepare bundle icon
+      - name: Prepare bundle assets
         run: convert assets/icon.png -resize 512x512 build/linux/x64/release/bundle/recipe_manager.png
 
-      - name: Install Flatpak tooling
+      - name: Copy missing libs into bundle
         run: |
-          sudo apt-get install -y flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+          BUNDLE_LIB=build/linux/x64/release/bundle/lib
+          copy_if_missing() {
+            local lib=$1
+            local found=$(find /usr/lib/x86_64-linux-gnu /usr/lib -name "$lib" 2>/dev/null | head -1)
+            if [ -n "$found" ]; then
+              echo "Copying $found"
+              cp "$found" "$BUNDLE_LIB/"
+            else
+              echo "WARNING: $lib not found on host"
+            fi
+          }
+          ldd build/linux/x64/release/bundle/recipe_manager \
+            | grep "not found" \
+            | awk '{print $1}' \
+            | while read lib; do copy_if_missing "$lib"; done
+          for solib in "$BUNDLE_LIB"/*.so*; do
+            ldd "$solib" 2>/dev/null \
+              | grep "not found" \
+              | awk '{print $1}' \
+              | while read lib; do copy_if_missing "$lib"; done
+          done
 
-      - name: Create Flatpak bundle
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Build Snap package
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          cat > au.com.sharpblue.recipe_manager.yaml <<'EOF'
-          app-id: au.com.sharpblue.recipe_manager
-          runtime: org.freedesktop.Platform
-          runtime-version: '24.08'
-          sdk: org.freedesktop.Sdk
-          command: recipe_manager
-          finish-args:
-            - --share=ipc
-            - --socket=fallback-x11
-            - --socket=wayland
-            - --device=dri
-            - --filesystem=home
-          modules:
-            - name: recipe_manager
-              buildsystem: simple
-              build-commands:
-                - install -Dm755 recipe_manager /app/bin/recipe_manager
-                - cp -r lib /app/lib
-                - cp -r data /app/data
-                - install -Dm644 au.com.sharpblue.recipe_manager.desktop /app/share/applications/au.com.sharpblue.recipe_manager.desktop
-                - install -Dm644 recipe_manager.png /app/share/icons/hicolor/512x512/apps/au.com.sharpblue.recipe_manager.png
-              sources:
-                - type: dir
-                  path: build/linux/x64/release/bundle
-                - type: file
-                  path: au.com.sharpblue.recipe_manager.desktop
-          EOF
-
-          cat > au.com.sharpblue.recipe_manager.desktop <<'EOF'
-          [Desktop Entry]
-          Name=Recipe Manager
-          Exec=recipe_manager
-          Type=Application
-          Categories=Office;
-          Icon=au.com.sharpblue.recipe_manager
-          Terminal=false
-          EOF
-
-          flatpak-builder --force-clean --repo=repo build-dir au.com.sharpblue.recipe_manager.yaml
-          flatpak build-bundle repo recipe-manager-${VERSION}-linux-x86_64.flatpak au.com.sharpblue.recipe_manager
+          sed -i "s/^version: .*/version: '${{ steps.version.outputs.version }}'/" snap/snapcraft.yaml
+          snapcraft --destructive-mode
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v0.1.15
         with:
-          files: 'recipe-manager-${{ steps.version.outputs.version }}-linux-x86_64.flatpak'
+          files: 'recipe-manager_${{ steps.version.outputs.version }}_amd64.snap'
           name: 'recipe-manager-${{ steps.version.outputs.version }}'
           tag_name: ${{ steps.version.outputs.version }}
