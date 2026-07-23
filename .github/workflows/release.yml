@@ -66,12 +66,12 @@ jobs:
         run: |
           brew install create-dmg
           create-dmg \
-            --volname "recipe-manager" \
+            --volname "recipe-manager-${{ needs.prepare.outputs.version }}" \
             --window-pos 200 120 --window-size 800 450 \
             --icon-size 100 \
             --icon "Recipe Manager.app" 200 185 \
             --app-drop-link 600 185 \
-            recipe-manager.dmg \
+            "recipe-manager-${{ needs.prepare.outputs.version }}.dmg" \
             "build/macos/Build/Products/Release/Recipe Manager.app"
 
       - name: Create GitHub Release
@@ -79,7 +79,7 @@ jobs:
         with:
           name: 'recipe-manager-${{ needs.prepare.outputs.version }}'
           tag_name: ${{ needs.prepare.outputs.version }}
-          files: 'recipe-manager.dmg'
+          files: 'recipe-manager-${{ needs.prepare.outputs.version }}.dmg'
 
   build-windows:
     needs: prepare
