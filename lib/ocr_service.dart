@@ -10,26 +10,36 @@ class OcrSettings {
   final String claudeApiKey;
   final String ollamaUrl;
   final String ollamaModel;
+  final String ollamaTextModel;
   final OcrBackend preferred;
 
   const OcrSettings({
     this.claudeApiKey = '',
     this.ollamaUrl = 'http://localhost:11434',
     this.ollamaModel = 'llama3.2-vision',
+    this.ollamaTextModel = '',
     this.preferred = OcrBackend.ollama,
   });
 
   bool get isConfigured => preferred == OcrBackend.ollama
       ? ollamaUrl.isNotEmpty
       : claudeApiKey.isNotEmpty;
+
+  /// The model used for text-based extraction (web-page import). Falls back
+  /// to the vision model if no separate text model has been configured.
+  String get effectiveOllamaTextModel =>
+      ollamaTextModel.isEmpty ? ollamaModel : ollamaTextModel;
 }
 
 abstract class OcrService {
   factory OcrService.claude(String apiKey) = _ClaudeOcrService;
-  factory OcrService.ollama({required String baseUrl, required String model}) =
-      _OllamaOcrService;
+  factory OcrService.ollama(
+      {required String baseUrl,
+      required String model,
+      required String textModel}) = _OllamaOcrService;
 
   Future<RecipeData> extractRecipe(String filePath);
+  Future<RecipeData> extractRecipeFromUrl(String url);
 
   static Future<List<String>> fetchOllamaModels(String baseUrl) async {
     final base =
@@ -113,6 +123,66 @@ RecipeData _extractAndParseJson(String text) {
       jsonDecode(jsonMatch.group(0)!) as Map<String, dynamic>);
 }
 
+Future<String> _fetchPageText(String url) async {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || !uri.hasScheme) {
+    throw Exception('Enter a valid URL');
+  }
+
+  late http.Response response;
+  try {
+    response = await http.get(
+      uri,
+      headers: {'User-Agent': 'Mozilla/5.0 (compatible; RecipeManager/1.0)'},
+    ).timeout(const Duration(seconds: 20));
+  } on TimeoutException {
+    throw Exception('Timed out fetching the web page');
+  } on SocketException catch (e) {
+    throw Exception('Could not reach $url ($e)');
+  }
+
+  if (response.statusCode != 200) {
+    throw Exception('Web page returned ${response.statusCode}');
+  }
+
+  final text = _stripHtml(response.body);
+  if (text.isEmpty) {
+    throw Exception('Could not find any readable text on that page');
+  }
+  return text;
+}
+
+String _stripHtml(String html) {
+  var text = html
+      .replaceAll(
+          RegExp(r'<script[^>]*>.*?</script>',
+              dotAll: true, caseSensitive: false),
+          ' ')
+      .replaceAll(
+          RegExp(r'<style[^>]*>.*?</style>',
+              dotAll: true, caseSensitive: false),
+          ' ')
+      .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), ' ')
+      .replaceAll(RegExp(r'<[^>]+>'), ' ');
+
+  text = text
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll(RegExp(r'&#\d+;'), '');
+
+  text = text
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r'\n\s*\n+'), '\n')
+      .trim();
+
+  const maxLength = 20000;
+  return text.length > maxLength ? text.substring(0, maxLength) : text;
+}
+
 // ─── Claude backend ───────────────────────────────────────────────────────────
 
 class _ClaudeOcrService implements OcrService {
@@ -185,6 +255,40 @@ class _ClaudeOcrService implements OcrService {
         'webp' => 'image/webp',
         _ => 'image/jpeg',
       };
+
+  @override
+  Future<RecipeData> extractRecipeFromUrl(String url) async {
+    final pageText = await _fetchPageText(url);
+
+    final response = await http.post(
+      Uri.parse(_apiUrl),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: jsonEncode({
+        'model': _model,
+        'max_tokens': 4096,
+        'messages': [
+          {
+            'role': 'user',
+            'content': '$_recipePrompt\n\nWeb page content:\n\n$pageText',
+          },
+        ],
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final msg = (body['error'] as Map?)?['message'] ?? response.body;
+      throw Exception(msg);
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final text = ((data['content'] as List).first as Map)['text'] as String;
+    return _extractAndParseJson(text);
+  }
 }
 
 // ─── Ollama backend ───────────────────────────────────────────────────────────
@@ -192,8 +296,10 @@ class _ClaudeOcrService implements OcrService {
 class _OllamaOcrService implements OcrService {
   final String baseUrl;
   final String model;
+  final String textModel;
 
-  _OllamaOcrService({required this.baseUrl, required this.model});
+  _OllamaOcrService(
+      {required this.baseUrl, required this.model, required this.textModel});
 
   @override
   Future<RecipeData> extractRecipe(String filePath) async {
@@ -225,6 +331,49 @@ class _OllamaOcrService implements OcrService {
     } on TimeoutException {
       throw Exception(
           'Ollama timed out after 3 minutes. Is the model loaded? Run: ollama pull $model');
+    } on SocketException catch (e) {
+      throw Exception('Could not reach Ollama at $baseUrl — is it running? ($e)');
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception('Ollama error ${response.statusCode}: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final text = (data['message'] as Map)['content'] as String;
+    return _extractAndParseJson(text);
+  }
+
+  @override
+  Future<RecipeData> extractRecipeFromUrl(String url) async {
+    final pageText = await _fetchPageText(url);
+
+    final base =
+        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final apiUrl = Uri.parse('$base/api/chat');
+
+    late http.Response response;
+    try {
+      response = await http
+          .post(
+            apiUrl,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'model': textModel,
+              'stream': false,
+              'messages': [
+                {
+                  'role': 'user',
+                  'content':
+                      '$_recipePrompt\n\nWeb page content:\n\n$pageText',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(minutes: 3));
+    } on TimeoutException {
+      throw Exception(
+          'Ollama timed out after 3 minutes. Is the model loaded? Run: ollama pull $textModel');
     } on SocketException catch (e) {
       throw Exception('Could not reach Ollama at $baseUrl — is it running? ($e)');
     }

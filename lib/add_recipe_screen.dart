@@ -176,6 +176,9 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     final urlCtrl = TextEditingController(text: current.ollamaUrl);
     String selectedModel = current.ollamaModel;
     final modelCtrl = TextEditingController(text: current.ollamaModel);
+    String selectedTextModel = current.effectiveOllamaTextModel;
+    final textModelCtrl =
+        TextEditingController(text: current.effectiveOllamaTextModel);
 
     List<String>? ollamaModels;
     bool loadingModels = false;
@@ -206,6 +209,11 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                   selectedModel = models.first;
                   modelCtrl.text = selectedModel;
                 }
+                if (models.isNotEmpty &&
+                    !models.contains(selectedTextModel)) {
+                  selectedTextModel = models.first;
+                  textModelCtrl.text = selectedTextModel;
+                }
               });
             }).catchError((_) {
               if (!ctx.mounted) return;
@@ -219,7 +227,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           final hasModels = ollamaModels != null && ollamaModels!.isNotEmpty;
 
           return AlertDialog(
-            title: const Text('Import Settings'),
+            title: const Text('LLM Settings'),
             content: ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 460),
               child: Column(
@@ -291,9 +299,10 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                             ? selectedModel
                             : ollamaModels!.first,
                         decoration: const InputDecoration(
-                          labelText: 'Model',
+                          labelText: 'Vision model',
                           border: OutlineInputBorder(),
-                          helperText: 'Select a vision-capable model',
+                          helperText:
+                              'For image/PDF import — select a vision-capable model',
                         ),
                         isExpanded: true,
                         items: ollamaModels!
@@ -313,14 +322,54 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                       TextField(
                         controller: modelCtrl,
                         decoration: InputDecoration(
-                          labelText: 'Model',
+                          labelText: 'Vision model',
                           hintText: 'llama3.2-vision',
                           border: const OutlineInputBorder(),
                           helperText: loadingModels
                               ? 'Fetching models…'
-                              : 'Must be vision-capable. Pull with: ollama pull llama3.2-vision',
+                              : 'For image/PDF import. Must be vision-capable. Pull with: ollama pull llama3.2-vision',
                         ),
                         onChanged: (v) => selectedModel = v,
+                      ),
+                    const SizedBox(height: 16),
+                    if (hasModels)
+                      DropdownButtonFormField<String>(
+                        // ignore: deprecated_member_use
+                        value: ollamaModels!.contains(selectedTextModel)
+                            ? selectedTextModel
+                            : ollamaModels!.first,
+                        decoration: const InputDecoration(
+                          labelText: 'Text model',
+                          border: OutlineInputBorder(),
+                          helperText:
+                              'For web page import — select an instruction-following model, not an OCR-only one',
+                        ),
+                        isExpanded: true,
+                        items: ollamaModels!
+                            .map((m) =>
+                                DropdownMenuItem(value: m, child: Text(m)))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setDs(() {
+                              selectedTextModel = v;
+                              textModelCtrl.text = v;
+                            });
+                          }
+                        },
+                      )
+                    else
+                      TextField(
+                        controller: textModelCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Text model',
+                          hintText: 'llama3.2 or qwen2.5',
+                          border: const OutlineInputBorder(),
+                          helperText: loadingModels
+                              ? 'Fetching models…'
+                              : 'For web page import. Must be instruction-following, not OCR-only.',
+                        ),
+                        onChanged: (v) => selectedTextModel = v,
                       ),
                   ] else ...[
                     TextField(
@@ -352,6 +401,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                     ollamaModel: selectedModel.trim().isEmpty
                         ? 'llama3.2-vision'
                         : selectedModel.trim(),
+                    ollamaTextModel: selectedTextModel.trim(),
                     preferred: backend,
                   ),
                 ),
@@ -366,6 +416,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     claudeCtrl.dispose();
     urlCtrl.dispose();
     modelCtrl.dispose();
+    textModelCtrl.dispose();
 
     if (result != null) {
       await ref.read(ocrSettingsProvider.notifier).save(result);
@@ -405,10 +456,106 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           ? OcrService.ollama(
               baseUrl: settings.ollamaUrl,
               model: settings.ollamaModel,
+              textModel: settings.effectiveOllamaTextModel,
             )
           : OcrService.claude(settings.claudeApiKey);
 
       final data = await service.extractRecipe(file.path);
+      setState(() {
+        _mode = _Mode.add;
+        _editingPage = null;
+      });
+      _populateForm(data);
+    } catch (e) {
+      setState(() => _error = 'Import failed: $e');
+    } finally {
+      setState(() => _importing = false);
+    }
+  }
+
+  Future<void> _importFromWebPage() async {
+    var settings = ref.read(ocrSettingsProvider).value;
+
+    if (settings == null || !settings.isConfigured) {
+      settings = await _showImportSettings();
+      if (settings == null || !settings.isConfigured) return;
+    }
+
+    if (!mounted) return;
+
+    final formKey = GlobalKey<FormState>();
+    final urlCtrl = TextEditingController();
+
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import from Web Page'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 440),
+          child: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: urlCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Recipe page URL',
+                hintText: 'https://example.com/recipe',
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) {
+                final value = v?.trim() ?? '';
+                if (value.isEmpty) return 'URL is required';
+                final uri = Uri.tryParse(value);
+                if (uri == null || !uri.hasScheme) return 'Enter a valid URL';
+                return null;
+              },
+              onFieldSubmitted: (_) {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(ctx, urlCtrl.text.trim());
+                }
+              },
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(ctx, urlCtrl.text.trim());
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty) {
+      urlCtrl.dispose();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => urlCtrl.dispose());
+
+    setState(() {
+      _importing = true;
+      _error = null;
+      _saved = false;
+    });
+
+    try {
+      final OcrService service = settings.preferred == OcrBackend.ollama
+          ? OcrService.ollama(
+              baseUrl: settings.ollamaUrl,
+              model: settings.ollamaModel,
+              textModel: settings.effectiveOllamaTextModel,
+            )
+          : OcrService.claude(settings.claudeApiKey);
+
+      final data = await service.extractRecipeFromUrl(url);
       setState(() {
         _mode = _Mode.add;
         _editingPage = null;
@@ -656,18 +803,52 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
               _saved = false;
             }),
           ),
-          IconButton(
+          PopupMenuButton<String>(
+            enabled: !(_importing || _saving || _loadingRecipe),
+            tooltip: 'Import recipe',
             icon: _importing
                 ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.document_scanner_outlined),
-            tooltip: 'Import recipe from image or PDF',
-            onPressed: (_importing || _saving || _loadingRecipe)
-                ? null
-                : _importRecipe,
+            onSelected: (value) async {
+              if (value == 'image_pdf') {
+                await _importRecipe();
+              } else if (value == 'web_page') {
+                await _importFromWebPage();
+              } else if (value == 'llm_settings') {
+                await _showImportSettings();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'image_pdf',
+                child: Row(children: [
+                  Icon(Icons.image_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Import Image or PDF…'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'web_page',
+                child: Row(children: [
+                  Icon(Icons.language_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Import Web Page…'),
+                ]),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'llm_settings',
+                child: Row(children: [
+                  Icon(Icons.settings_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('LLM Settings…'),
+                ]),
+              ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.sort),
@@ -683,8 +864,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
             onSelected: (value) async {
               if (value == 'change') {
                 ref.read(epubPathProvider.notifier).clearPath();
-              } else if (value == 'import_settings') {
-                await _showImportSettings();
               } else if (value == 'new_cookbook') {
                 await _showNewCookbookDialog();
               }
@@ -704,14 +883,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                   Icon(Icons.folder_open_outlined, size: 20),
                   SizedBox(width: 12),
                   Text('Open EPUB file…'),
-                ]),
-              ),
-              PopupMenuItem(
-                value: 'import_settings',
-                child: Row(children: [
-                  Icon(Icons.settings_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('Import settings…'),
                 ]),
               ),
             ],

@@ -45,6 +45,7 @@ class OcrSettingsNotifier extends AsyncNotifier<OcrSettings> {
           prefs.getString('ocr_ollama_url') ?? 'http://localhost:11434',
       ollamaModel:
           prefs.getString('ocr_ollama_model') ?? 'llama3.2-vision',
+      ollamaTextModel: prefs.getString('ocr_ollama_text_model') ?? '',
       preferred: OcrBackend.values.firstWhere(
         (b) => b.name == (prefs.getString('ocr_preferred') ?? ''),
         orElse: () => OcrBackend.ollama,
@@ -57,6 +58,7 @@ class OcrSettingsNotifier extends AsyncNotifier<OcrSettings> {
     await prefs.setString('ocr_claude_key', settings.claudeApiKey);
     await prefs.setString('ocr_ollama_url', settings.ollamaUrl);
     await prefs.setString('ocr_ollama_model', settings.ollamaModel);
+    await prefs.setString('ocr_ollama_text_model', settings.ollamaTextModel);
     await prefs.setString('ocr_preferred', settings.preferred.name);
     state = AsyncValue.data(settings);
   }
