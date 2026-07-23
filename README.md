@@ -9,6 +9,7 @@ A Flutter desktop app for managing a personal recipe ebook. It reads and writes 
 - **Measurement conversion** — entering a quantity in imperial automatically fills in the metric equivalent (and vice versa), using built-in conversion rules.
 - **Reorder recipes and chapters** — a two-panel drag-and-drop screen lets you reorder chapters on the left and drag individual recipes between chapters on the right.
 - **Chapter management** — add new chapters, rename existing ones, delete them (recipes are moved to the unchaptered group), and drag them into any order. New chapters are written as proper chapter title pages in the EPUB.
+- **Import from a web page** — paste a recipe URL and the app fetches the page and uses your configured LLM to parse it into a new recipe, ready to review and edit. LLM settings support separate vision and text models, since a single Ollama model rarely does both well.
 
 ## Architecture
 
