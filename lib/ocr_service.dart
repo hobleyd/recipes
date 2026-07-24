@@ -327,10 +327,10 @@ class _OllamaOcrService implements OcrService {
               ],
             }),
           )
-          .timeout(const Duration(minutes: 3));
+          .timeout(const Duration(minutes: 10));
     } on TimeoutException {
       throw Exception(
-          'Ollama timed out after 3 minutes. Is the model loaded? Run: ollama pull $model');
+          'Ollama timed out after 10 minutes. Is the model loaded? Run: ollama pull $model');
     } on SocketException catch (e) {
       throw Exception('Could not reach Ollama at $baseUrl — is it running? ($e)');
     }
@@ -370,10 +370,10 @@ class _OllamaOcrService implements OcrService {
               ],
             }),
           )
-          .timeout(const Duration(minutes: 3));
+          .timeout(const Duration(minutes: 10));
     } on TimeoutException {
       throw Exception(
-          'Ollama timed out after 3 minutes. Is the model loaded? Run: ollama pull $textModel');
+          'Ollama timed out after 10 minutes. Is the model loaded? Run: ollama pull $textModel');
     } on SocketException catch (e) {
       throw Exception('Could not reach Ollama at $baseUrl — is it running? ($e)');
     }
