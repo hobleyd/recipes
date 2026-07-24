@@ -43,4 +43,6 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/inkworm_icon.png
 

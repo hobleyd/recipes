@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -757,6 +759,31 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     }
   }
 
+  Future<void> _openInInkworm() async {
+    final path = ref.read(epubPathProvider).value;
+    if (path == null) return;
+    try {
+      final result = Platform.isMacOS
+          ? await Process.run('open', ['-b', 'au.com.sharpblue.inkworm', path])
+          : Platform.isWindows
+              ? await Process.run('inkworm.exe', [path])
+              : await Process.run('inkworm', [path]);
+      if (result.exitCode != 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Could not open Inkworm: ${result.stderr.toString().trim()}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open Inkworm: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pagesAsync = ref.watch(epubPagesProvider);
@@ -856,6 +883,18 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
               MaterialPageRoute(
                   builder: (_) => const ReorderScreen()),
             ),
+          ),
+          IconButton(
+            icon: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.asset(
+                'assets/inkworm_icon.png',
+                width: 22,
+                height: 22,
+              ),
+            ),
+            tooltip: 'View in Inkworm',
+            onPressed: _openInInkworm,
           ),
           const SizedBox(width: 4),
           PopupMenuButton<String>(
