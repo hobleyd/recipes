@@ -13,6 +13,7 @@ class ReorderScreen extends ConsumerStatefulWidget {
 
 class _ReorderScreenState extends ConsumerState<ReorderScreen> {
   List<EpubChapter>? _chapters;
+  final List<EpubPage> _deletedPages = [];
   bool _saving = false;
   String? _error;
   bool _saved = false;
@@ -134,6 +135,38 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     });
   }
 
+  Future<void> _deletePageDialog(EpubPage page) async {
+    final cs = Theme.of(context).colorScheme;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Recipe'),
+        content: Text(
+            'Delete "${page.title}"? This cannot be undone once saved.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: cs.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      setState(() {
+        for (final ch in _chapters!) {
+          ch.pages.removeWhere((p) => p.href == page.href);
+        }
+        _deletedPages.add(page);
+        _saved = false;
+      });
+    }
+  }
+
   Future<String?> _promptChapterName({
     required String title,
     String initial = '',
@@ -173,11 +206,13 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     });
     try {
       final path = ref.read(epubPathProvider).value!;
-      await EpubService(path).reorderPages(_chapters!);
+      await EpubService(path)
+          .reorderPages(_chapters!, deletedPages: _deletedPages);
       ref.invalidate(epubPagesProvider);
       setState(() {
         _saving = false;
         _saved = true;
+        _deletedPages.clear();
       });
     } catch (e) {
       setState(() {
@@ -440,9 +475,21 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                 height: _recipeTileH,
                 child: ListTile(
                   title: Text(page.title),
-                  trailing: ReorderableDragStartListener(
-                    index: idx,
-                    child: const Icon(Icons.drag_handle),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        tooltip: 'Delete recipe',
+                        onPressed: () => _deletePageDialog(page),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                      ),
+                      ReorderableDragStartListener(
+                        index: idx,
+                        child: const Icon(Icons.drag_handle),
+                      ),
+                    ],
                   ),
                 ),
               );

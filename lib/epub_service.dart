@@ -693,9 +693,69 @@ $methodHtml</body>
     await file.writeAsBytes(ZipEncoder().encode(newArchive)!);
   }
 
+  // ── Delete pages ─────────────────────────────────────────────────────────
+
+  // Removes each page's XHTML file, manifest item, spine itemref, and any
+  // footnote it owns in attributions.xhtml. Their toc.ncx / HTML TOC entries
+  // are dropped implicitly by reorderPages, since those are rebuilt from the
+  // surviving pages in `chapters`.
+  String _deletePages(
+    Map<String, List<int>> fileMap,
+    String opf,
+    List<EpubPage> deletedPages,
+  ) {
+    var attr = fileMap['OEBPS/Text/attributions.xhtml'] != null
+        ? utf8.decode(fileMap['OEBPS/Text/attributions.xhtml']!)
+        : null;
+
+    for (final page in deletedPages) {
+      final filepath = 'OEBPS/${page.href}';
+      final xhtml =
+          fileMap[filepath] != null ? utf8.decode(fileMap[filepath]!) : null;
+      fileMap.remove(filepath);
+
+      if (page.id.isNotEmpty) {
+        final idEsc = RegExp.escape(page.id);
+        opf = opf.replaceFirst(
+          RegExp('\\n?\\s*<item\\b[^>]*\\bid="$idEsc"[^>]*/>'),
+          '',
+        );
+        opf = opf.replaceFirst(
+          RegExp('\\n?\\s*<itemref\\b[^>]*\\bidref="$idEsc"[^>]*/>'),
+          '',
+        );
+      }
+
+      if (xhtml != null && attr != null) {
+        final footnoteNum = RegExp(r'href="attributions\.xhtml#footnote-(\d+)"')
+            .firstMatch(xhtml)
+            ?.group(1);
+        if (footnoteNum != null) {
+          attr = attr.replaceFirst(
+            RegExp(
+              r'\n<section>\n\s*<p[^>]*id="footnote-' +
+                  footnoteNum +
+                  r'"[^>]*>.*?</p>\n</section>',
+              dotAll: true,
+            ),
+            '',
+          );
+        }
+      }
+    }
+
+    if (attr != null) {
+      fileMap['OEBPS/Text/attributions.xhtml'] = utf8.encode(attr);
+    }
+    return opf;
+  }
+
   // ── Reorder pages ─────────────────────────────────────────────────────────
 
-  Future<void> reorderPages(List<EpubChapter> chapters) async {
+  Future<void> reorderPages(
+    List<EpubChapter> chapters, {
+    List<EpubPage> deletedPages = const [],
+  }) async {
     final file = File(epubPath);
     await file.copy('$epubPath.old');
 
@@ -707,6 +767,10 @@ $methodHtml</body>
     }
 
     var opf = utf8.decode(fileMap['OEBPS/content.opf']!);
+
+    if (deletedPages.isNotEmpty) {
+      opf = _deletePages(fileMap, opf, deletedPages);
+    }
 
     // Find chapter titles that already have a standalone title page (body is
     // just <h1 class="title">…</h1>), so we don't create duplicates on
