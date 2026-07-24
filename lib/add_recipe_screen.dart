@@ -168,8 +168,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   }
 
   Future<OcrSettings?> _showImportSettings() async {
-    final current =
-        ref.read(ocrSettingsProvider).value ?? const OcrSettings();
+    final current = await ref.read(ocrSettingsProvider.future);
 
     var backend = current.preferred;
     final claudeCtrl = TextEditingController(text: current.claudeApiKey);
@@ -426,7 +425,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   }
 
   Future<void> _importRecipe() async {
-    var settings = ref.read(ocrSettingsProvider).value;
+    OcrSettings? settings = await ref.read(ocrSettingsProvider.future);
 
     if (settings == null || !settings.isConfigured) {
       settings = await _showImportSettings();
@@ -474,7 +473,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   }
 
   Future<void> _importFromWebPage() async {
-    var settings = ref.read(ocrSettingsProvider).value;
+    OcrSettings? settings = await ref.read(ocrSettingsProvider.future);
 
     if (settings == null || !settings.isConfigured) {
       settings = await _showImportSettings();
