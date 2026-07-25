@@ -40,6 +40,7 @@ abstract class OcrService {
 
   Future<RecipeData> extractRecipe(String filePath);
   Future<RecipeData> extractRecipeFromUrl(String url);
+  Future<RecipeData> extractRecipeFromText(String text);
 
   static Future<List<String>> fetchOllamaModels(String baseUrl) async {
     final base =
@@ -259,7 +260,15 @@ class _ClaudeOcrService implements OcrService {
   @override
   Future<RecipeData> extractRecipeFromUrl(String url) async {
     final pageText = await _fetchPageText(url);
+    return _extractFromPrompt('$_recipePrompt\n\nWeb page content:\n\n$pageText');
+  }
 
+  @override
+  Future<RecipeData> extractRecipeFromText(String text) {
+    return _extractFromPrompt('$_recipePrompt\n\nRecipe text:\n\n$text');
+  }
+
+  Future<RecipeData> _extractFromPrompt(String prompt) async {
     final response = await http.post(
       Uri.parse(_apiUrl),
       headers: {
@@ -271,10 +280,7 @@ class _ClaudeOcrService implements OcrService {
         'model': _model,
         'max_tokens': 4096,
         'messages': [
-          {
-            'role': 'user',
-            'content': '$_recipePrompt\n\nWeb page content:\n\n$pageText',
-          },
+          {'role': 'user', 'content': prompt},
         ],
       }),
     );
@@ -318,6 +324,8 @@ class _OllamaOcrService implements OcrService {
             body: jsonEncode({
               'model': model,
               'stream': false,
+              'think': false,
+              'options': {'num_predict': 4096},
               'messages': [
                 {
                   'role': 'user',
@@ -347,7 +355,16 @@ class _OllamaOcrService implements OcrService {
   @override
   Future<RecipeData> extractRecipeFromUrl(String url) async {
     final pageText = await _fetchPageText(url);
+    return _extractFromPrompt(
+        '$_recipePrompt\n\nWeb page content:\n\n$pageText');
+  }
 
+  @override
+  Future<RecipeData> extractRecipeFromText(String text) {
+    return _extractFromPrompt('$_recipePrompt\n\nRecipe text:\n\n$text');
+  }
+
+  Future<RecipeData> _extractFromPrompt(String prompt) async {
     final base =
         baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
     final apiUrl = Uri.parse('$base/api/chat');
@@ -361,12 +378,10 @@ class _OllamaOcrService implements OcrService {
             body: jsonEncode({
               'model': textModel,
               'stream': false,
+              'think': false,
+              'options': {'num_predict': 4096},
               'messages': [
-                {
-                  'role': 'user',
-                  'content':
-                      '$_recipePrompt\n\nWeb page content:\n\n$pageText',
-                },
+                {'role': 'user', 'content': prompt},
               ],
             }),
           )

@@ -95,8 +95,8 @@ class AddRecipeScreen extends ConsumerStatefulWidget {
   /// Page to open directly in edit mode for.
   final EpubPage? initialEditingPage;
 
-  /// If set ('image_pdf' or 'web_page'), automatically triggers that import
-  /// flow as soon as the screen opens.
+  /// If set ('image_pdf', 'web_page', or 'text'), automatically triggers
+  /// that import flow as soon as the screen opens.
   final String? autoImportAction;
 
   @override
@@ -140,6 +140,8 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           _importRecipe();
         } else if (widget.autoImportAction == 'web_page') {
           _importFromWebPage();
+        } else if (widget.autoImportAction == 'text') {
+          _importFromText();
         }
       });
     }
@@ -336,6 +338,96 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           : OcrService.claude(settings.claudeApiKey);
 
       final data = await service.extractRecipeFromUrl(url);
+      setState(() {
+        _mode = _Mode.add;
+        _editingPage = null;
+      });
+      _populateForm(data);
+    } catch (e) {
+      setState(() => _error = 'Import failed: $e');
+    } finally {
+      setState(() => _importing = false);
+    }
+  }
+
+  Future<void> _importFromText() async {
+    OcrSettings? settings = await ref.read(ocrSettingsProvider.future);
+
+    if (settings == null || !settings.isConfigured) {
+      settings = await showOcrSettingsDialog(context, ref);
+      if (settings == null || !settings.isConfigured) return;
+    }
+
+    if (!mounted) return;
+
+    final formKey = GlobalKey<FormState>();
+    final textCtrl = TextEditingController();
+
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import from Text'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 440),
+          child: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: textCtrl,
+              autofocus: true,
+              minLines: 8,
+              maxLines: 16,
+              decoration: const InputDecoration(
+                labelText: 'Recipe text',
+                hintText: 'Paste the recipe text here…',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+              validator: (v) {
+                final value = v?.trim() ?? '';
+                if (value.isEmpty) return 'Recipe text is required';
+                return null;
+              },
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(ctx, textCtrl.text.trim());
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (text == null || text.isEmpty) {
+      textCtrl.dispose();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => textCtrl.dispose());
+
+    setState(() {
+      _importing = true;
+      _error = null;
+      _saved = false;
+    });
+
+    try {
+      final OcrService service = settings.preferred == OcrBackend.ollama
+          ? OcrService.ollama(
+              baseUrl: settings.ollamaUrl,
+              model: settings.ollamaModel,
+              textModel: settings.effectiveOllamaTextModel,
+            )
+          : OcrService.claude(settings.claudeApiKey);
+
+      final data = await service.extractRecipeFromText(text);
       setState(() {
         _mode = _Mode.add;
         _editingPage = null;

@@ -766,6 +766,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     required String tooltip,
     required VoidCallback onImage,
     required VoidCallback onWeb,
+    required VoidCallback onText,
   }) {
     return PopupMenuButton<String>(
       tooltip: tooltip,
@@ -776,6 +777,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
           onImage();
         } else if (v == 'web_page') {
           onWeb();
+        } else if (v == 'text') {
+          onText();
         }
       },
       itemBuilder: (_) => const [
@@ -795,6 +798,14 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
             Text('Import Web Page…'),
           ]),
         ),
+        PopupMenuItem(
+          value: 'text',
+          child: Row(children: [
+            Icon(Icons.text_snippet_outlined, size: 18),
+            SizedBox(width: 10),
+            Text('Import Text…'),
+          ]),
+        ),
       ],
     );
   }
@@ -811,6 +822,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     required String importTooltip,
     required VoidCallback onImportImage,
     required VoidCallback onImportWeb,
+    required VoidCallback onImportText,
     required String deleteTooltip,
     VoidCallback? onDelete,
     required int dragIndex,
@@ -827,7 +839,10 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 6),
         ),
         _importPopupButton(
-            tooltip: importTooltip, onImage: onImportImage, onWeb: onImportWeb),
+            tooltip: importTooltip,
+            onImage: onImportImage,
+            onWeb: onImportWeb,
+            onText: onImportText),
         IconButton(
           icon: const Icon(Icons.delete_outline, size: 18),
           tooltip: deleteTooltip,
@@ -908,6 +923,9 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                         onImportWeb: () => _openRecipeEditor(
                             insertAfter: _startAnchorForChapter(item),
                             autoImportAction: 'web_page'),
+                        onImportText: () => _openRecipeEditor(
+                            insertAfter: _startAnchorForChapter(item),
+                            autoImportAction: 'text'),
                         deleteTooltip: 'Delete chapter',
                         onDelete: item.title != null
                             ? () => _deleteChapter(item)
@@ -942,6 +960,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                           insertAfter: page, autoImportAction: 'image_pdf'),
                       onImportWeb: () => _openRecipeEditor(
                           insertAfter: page, autoImportAction: 'web_page'),
+                      onImportText: () => _openRecipeEditor(
+                          insertAfter: page, autoImportAction: 'text'),
                       deleteTooltip: 'Delete recipe',
                       onDelete: () => _deletePageDialog(page),
                       dragIndex: idx,
