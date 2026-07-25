@@ -1000,15 +1000,14 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     } else {
       if (newIdx > oldIdx) newIdx--;
       final item = mutable.removeAt(oldIdx);
-      // If the insertion point lands on a chapter header, advance past it
-      // so the recipe lands inside that chapter — but only when the
-      // preceding item is a recipe (not another header). Two consecutive
-      // headers means an empty chapter: stay put so the recipe drops into
-      // the empty chapter, not the one after.
+      // Landing exactly at a chapter header's slot means "insert
+      // immediately before it" — i.e. stay as the last recipe of the
+      // preceding chapter. The only exception is position 0, where there
+      // is no preceding chapter to land in, so advance past that header.
       var insertIdx = newIdx.clamp(0, mutable.length);
-      if (insertIdx < mutable.length &&
-          mutable[insertIdx] is EpubChapter &&
-          (insertIdx == 0 || mutable[insertIdx - 1] is! EpubChapter)) {
+      if (insertIdx == 0 &&
+          insertIdx < mutable.length &&
+          mutable[insertIdx] is EpubChapter) {
         insertIdx++;
       }
       mutable.insert(insertIdx, item);
