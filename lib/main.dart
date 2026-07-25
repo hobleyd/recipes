@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'add_recipe_screen.dart';
 import 'providers.dart';
+import 'reorder_screen.dart';
 import 'setup_screen.dart';
 
 void main() {
@@ -38,7 +38,7 @@ class _AppRouter extends ConsumerWidget {
         body: Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => const SetupScreen(),
-      data: (path) => path == null ? const SetupScreen() : const AddRecipeScreen(),
+      data: (path) => path == null ? const SetupScreen() : const ReorderScreen(),
     );
   }
 }

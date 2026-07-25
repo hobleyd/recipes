@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,8 +5,8 @@ import 'epub_service.dart';
 import 'measurement_converter.dart';
 import 'models.dart';
 import 'ocr_service.dart';
+import 'ocr_settings_dialog.dart';
 import 'providers.dart';
-import 'reorder_screen.dart';
 
 enum _Mode { add, edit }
 
@@ -84,7 +82,22 @@ class _IngTable {
 }
 
 class AddRecipeScreen extends ConsumerStatefulWidget {
-  const AddRecipeScreen({super.key});
+  const AddRecipeScreen({
+    super.key,
+    this.initialInsertAfter,
+    this.initialEditingPage,
+    this.autoImportAction,
+  });
+
+  /// Page to pre-select as the insertion point when opening in add mode.
+  final EpubPage? initialInsertAfter;
+
+  /// Page to open directly in edit mode for.
+  final EpubPage? initialEditingPage;
+
+  /// If set ('image_pdf' or 'web_page'), automatically triggers that import
+  /// flow as soon as the screen opens.
+  final String? autoImportAction;
 
   @override
   ConsumerState<AddRecipeScreen> createState() => _AddRecipeScreenState();
@@ -108,6 +121,29 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   bool _importing = false;
   String? _error;
   bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialEditingPage != null) {
+      _mode = _Mode.edit;
+      _editingPage = widget.initialEditingPage;
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _loadRecipeForEditing(widget.initialEditingPage!));
+    } else if (widget.initialInsertAfter != null) {
+      _mode = _Mode.add;
+      _insertAfter = widget.initialInsertAfter;
+    }
+    if (widget.autoImportAction != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (widget.autoImportAction == 'image_pdf') {
+          _importRecipe();
+        } else if (widget.autoImportAction == 'web_page') {
+          _importFromWebPage();
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -169,268 +205,11 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     }
   }
 
-  Future<OcrSettings?> _showImportSettings() async {
-    final current = await ref.read(ocrSettingsProvider.future);
-
-    var backend = current.preferred;
-    final claudeCtrl = TextEditingController(text: current.claudeApiKey);
-    final urlCtrl = TextEditingController(text: current.ollamaUrl);
-    String selectedModel = current.ollamaModel;
-    final modelCtrl = TextEditingController(text: current.ollamaModel);
-    String selectedTextModel = current.effectiveOllamaTextModel;
-    final textModelCtrl =
-        TextEditingController(text: current.effectiveOllamaTextModel);
-
-    List<String>? ollamaModels;
-    bool loadingModels = false;
-
-    if (backend == OcrBackend.ollama) {
-      try {
-        ollamaModels = await OcrService.fetchOllamaModels(current.ollamaUrl)
-            .timeout(const Duration(seconds: 2));
-      } catch (_) {}
-    }
-
-    if (!mounted) return null;
-
-    final result = await showDialog<OcrSettings>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDs) {
-          void fetchModels() {
-            setDs(() => loadingModels = true);
-            OcrService.fetchOllamaModels(urlCtrl.text.trim())
-                .timeout(const Duration(seconds: 5))
-                .then((models) {
-              if (!ctx.mounted) return;
-              setDs(() {
-                ollamaModels = models;
-                loadingModels = false;
-                if (models.isNotEmpty && !models.contains(selectedModel)) {
-                  selectedModel = models.first;
-                  modelCtrl.text = selectedModel;
-                }
-                if (models.isNotEmpty &&
-                    !models.contains(selectedTextModel)) {
-                  selectedTextModel = models.first;
-                  textModelCtrl.text = selectedTextModel;
-                }
-              });
-            }).catchError((_) {
-              if (!ctx.mounted) return;
-              setDs(() {
-                ollamaModels = null;
-                loadingModels = false;
-              });
-            });
-          }
-
-          final hasModels = ollamaModels != null && ollamaModels!.isNotEmpty;
-
-          return AlertDialog(
-            title: const Text('LLM Settings'),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 460),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SegmentedButton<OcrBackend>(
-                    segments: const [
-                      ButtonSegment(
-                        value: OcrBackend.ollama,
-                        label: Text('Ollama (local)'),
-                        icon: Icon(Icons.computer_outlined),
-                      ),
-                      ButtonSegment(
-                        value: OcrBackend.claude,
-                        label: Text('Claude API'),
-                        icon: Icon(Icons.cloud_outlined),
-                      ),
-                    ],
-                    selected: {backend},
-                    onSelectionChanged: (s) {
-                      setDs(() => backend = s.first);
-                      if (s.first == OcrBackend.ollama &&
-                          ollamaModels == null &&
-                          !loadingModels) {
-                        fetchModels();
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  if (backend == OcrBackend.ollama) ...[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: urlCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Ollama URL',
-                              hintText: 'http://localhost:11434',
-                              border: OutlineInputBorder(),
-                              helperText: 'Start Ollama with: ollama serve',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: IconButton(
-                            onPressed: loadingModels ? null : fetchModels,
-                            tooltip: 'Fetch available models',
-                            icon: loadingModels
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.refresh),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (hasModels)
-                      DropdownButtonFormField<String>(
-                        // ignore: deprecated_member_use
-                        value: ollamaModels!.contains(selectedModel)
-                            ? selectedModel
-                            : ollamaModels!.first,
-                        decoration: const InputDecoration(
-                          labelText: 'Vision model',
-                          border: OutlineInputBorder(),
-                          helperText:
-                              'For image/PDF import — select a vision-capable model',
-                        ),
-                        isExpanded: true,
-                        items: ollamaModels!
-                            .map((m) =>
-                                DropdownMenuItem(value: m, child: Text(m)))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setDs(() {
-                              selectedModel = v;
-                              modelCtrl.text = v;
-                            });
-                          }
-                        },
-                      )
-                    else
-                      TextField(
-                        controller: modelCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Vision model',
-                          hintText: 'llama3.2-vision',
-                          border: const OutlineInputBorder(),
-                          helperText: loadingModels
-                              ? 'Fetching models…'
-                              : 'For image/PDF import. Must be vision-capable. Pull with: ollama pull llama3.2-vision',
-                        ),
-                        onChanged: (v) => selectedModel = v,
-                      ),
-                    const SizedBox(height: 16),
-                    if (hasModels)
-                      DropdownButtonFormField<String>(
-                        // ignore: deprecated_member_use
-                        value: ollamaModels!.contains(selectedTextModel)
-                            ? selectedTextModel
-                            : ollamaModels!.first,
-                        decoration: const InputDecoration(
-                          labelText: 'Text model',
-                          border: OutlineInputBorder(),
-                          helperText:
-                              'For web page import — select an instruction-following model, not an OCR-only one',
-                        ),
-                        isExpanded: true,
-                        items: ollamaModels!
-                            .map((m) =>
-                                DropdownMenuItem(value: m, child: Text(m)))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setDs(() {
-                              selectedTextModel = v;
-                              textModelCtrl.text = v;
-                            });
-                          }
-                        },
-                      )
-                    else
-                      TextField(
-                        controller: textModelCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Text model',
-                          hintText: 'llama3.2 or qwen2.5',
-                          border: const OutlineInputBorder(),
-                          helperText: loadingModels
-                              ? 'Fetching models…'
-                              : 'For web page import. Must be instruction-following, not OCR-only.',
-                        ),
-                        onChanged: (v) => selectedTextModel = v,
-                      ),
-                  ] else ...[
-                    TextField(
-                      controller: claudeCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Anthropic API key',
-                        hintText: 'sk-ant-…',
-                        border: OutlineInputBorder(),
-                        helperText: 'Get your key at console.anthropic.com',
-                      ),
-                      obscureText: true,
-                      autofocus: current.claudeApiKey.isEmpty,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(
-                  ctx,
-                  OcrSettings(
-                    claudeApiKey: claudeCtrl.text.trim(),
-                    ollamaUrl: urlCtrl.text.trim(),
-                    ollamaModel: selectedModel.trim().isEmpty
-                        ? 'llama3.2-vision'
-                        : selectedModel.trim(),
-                    ollamaTextModel: selectedTextModel.trim(),
-                    preferred: backend,
-                  ),
-                ),
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    claudeCtrl.dispose();
-    urlCtrl.dispose();
-    modelCtrl.dispose();
-    textModelCtrl.dispose();
-
-    if (result != null) {
-      await ref.read(ocrSettingsProvider.notifier).save(result);
-      return result;
-    }
-    return null;
-  }
-
   Future<void> _importRecipe() async {
     OcrSettings? settings = await ref.read(ocrSettingsProvider.future);
 
     if (settings == null || !settings.isConfigured) {
-      settings = await _showImportSettings();
+      settings = await showOcrSettingsDialog(context, ref);
       if (settings == null || !settings.isConfigured) return;
     }
 
@@ -478,7 +257,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     OcrSettings? settings = await ref.read(ocrSettingsProvider.future);
 
     if (settings == null || !settings.isConfigured) {
-      settings = await _showImportSettings();
+      settings = await showOcrSettingsDialog(context, ref);
       if (settings == null || !settings.isConfigured) return;
     }
 
@@ -569,153 +348,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     }
   }
 
-  Future<void> _showNewCookbookDialog() async {
-    final formKey = GlobalKey<FormState>();
-    final titleCtrl = TextEditingController();
-    String? imagePath;
-    String? imageName;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDs) => AlertDialog(
-          title: const Text('New Cookbook'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 440),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextFormField(
-                    controller: titleCtrl,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      hintText: 'e.g. Smith Family Recipes',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) =>
-                        (v?.trim().isEmpty ?? true) ? 'Title is required' : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.image_outlined),
-                          label: Text(
-                            imageName ?? 'Choose title page image…',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          onPressed: () async {
-                            final file = await openFile(
-                              acceptedTypeGroups: [
-                                const XTypeGroup(
-                                  label: 'Images',
-                                  extensions: ['jpg', 'jpeg', 'png'],
-                                ),
-                              ],
-                            );
-                            if (file != null) {
-                              setDs(() {
-                                imagePath = file.path;
-                                imageName = file.name;
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                      if (imagePath != null) ...[
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.clear),
-                          tooltip: 'Remove image',
-                          onPressed: () => setDs(() {
-                            imagePath = null;
-                            imageName = null;
-                          }),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(ctx, true);
-                }
-              },
-              child: const Text('Choose location…'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    final title = titleCtrl.text.trim();
-    titleCtrl.dispose();
-    if (confirmed != true || title.isEmpty) return;
-
-    if (!mounted) return;
-    final slug = title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    final saveLocation = await getSaveLocation(
-      acceptedTypeGroups: [
-        const XTypeGroup(label: 'EPUB', extensions: ['epub']),
-      ],
-      suggestedName: '$slug.epub',
-    );
-    if (saveLocation == null) return;
-
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await EpubService.createCookbook(
-        path: saveLocation.path,
-        title: title,
-        coverImagePath: imagePath,
-      );
-
-      if (!mounted) return;
-      final openNow = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Cookbook created'),
-          content: Text('"$title" is ready. Open it now?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Later'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Open'),
-            ),
-          ],
-        ),
-      );
-
-      if (openNow == true && mounted) {
-        await ref.read(epubPathProvider.notifier).setPath(saveLocation.path);
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Failed to create cookbook: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   Future<void> _save() async {
     setState(() {
       _error = null;
@@ -759,31 +391,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     }
   }
 
-  Future<void> _openInInkworm() async {
-    final path = ref.read(epubPathProvider).value;
-    if (path == null) return;
-    try {
-      final result = Platform.isMacOS
-          ? await Process.run('open', ['-b', 'au.com.sharpblue.inkworm', path])
-          : Platform.isWindows
-              ? await Process.run('inkworm.exe', [path])
-              : await Process.run('inkworm', [path]);
-      if (result.exitCode != 0 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Could not open Inkworm: ${result.stderr.toString().trim()}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open Inkworm: $e')),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final pagesAsync = ref.watch(epubPagesProvider);
@@ -796,137 +403,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
             : 'Add Recipe — Recipe Manager'),
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Add recipe',
-            style: _mode == _Mode.add
-                ? IconButton.styleFrom(
-                    backgroundColor:
-                        cs.onPrimaryContainer.withValues(alpha: 0.15))
-                : null,
-            onPressed: () => setState(() {
-              _mode = _Mode.add;
-              _insertAfter = null;
-              _editingPage = null;
-              _error = null;
-              _saved = false;
-            }),
-          ),
-          IconButton(
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Edit recipe',
-            style: _mode == _Mode.edit
-                ? IconButton.styleFrom(
-                    backgroundColor:
-                        cs.onPrimaryContainer.withValues(alpha: 0.15))
-                : null,
-            onPressed: () => setState(() {
-              _mode = _Mode.edit;
-              _insertAfter = null;
-              _editingPage = null;
-              _error = null;
-              _saved = false;
-            }),
-          ),
-          PopupMenuButton<String>(
-            enabled: !(_importing || _saving || _loadingRecipe),
-            tooltip: 'Import recipe',
-            icon: _importing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.document_scanner_outlined),
-            onSelected: (value) async {
-              if (value == 'image_pdf') {
-                await _importRecipe();
-              } else if (value == 'web_page') {
-                await _importFromWebPage();
-              } else if (value == 'llm_settings') {
-                await _showImportSettings();
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'image_pdf',
-                child: Row(children: [
-                  Icon(Icons.image_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('Import Image or PDF…'),
-                ]),
-              ),
-              PopupMenuItem(
-                value: 'web_page',
-                child: Row(children: [
-                  Icon(Icons.language_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('Import Web Page…'),
-                ]),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'llm_settings',
-                child: Row(children: [
-                  Icon(Icons.settings_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('LLM Settings…'),
-                ]),
-              ),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.sort),
-            tooltip: 'Reorder pages & chapters',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const ReorderScreen()),
-            ),
-          ),
-          IconButton(
-            icon: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Image.asset(
-                'assets/inkworm_icon.png',
-                width: 22,
-                height: 22,
-              ),
-            ),
-            tooltip: 'View in Inkworm',
-            onPressed: _openInInkworm,
-          ),
-          const SizedBox(width: 4),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) async {
-              if (value == 'change') {
-                ref.read(epubPathProvider.notifier).clearPath();
-              } else if (value == 'new_cookbook') {
-                await _showNewCookbookDialog();
-              }
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'new_cookbook',
-                child: Row(children: [
-                  Icon(Icons.auto_stories_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('New cookbook…'),
-                ]),
-              ),
-              PopupMenuItem(
-                value: 'change',
-                child: Row(children: [
-                  Icon(Icons.folder_open_outlined, size: 20),
-                  SizedBox(width: 12),
-                  Text('Open EPUB file…'),
-                ]),
-              ),
-            ],
-          ),
-          const SizedBox(width: 4),
-        ],
       ),
       body: pagesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -976,6 +452,21 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                     validator: (v) =>
                         v == null ? 'Please select a page' : null,
                   ),
+                  if (_importing) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 10),
+                        Text('Importing recipe…',
+                            style: Theme.of(context).textTheme.bodyMedium),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 28),
                 ] else ...[
                   _sectionLabel('Recipe to edit'),
@@ -1144,7 +635,8 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                   width: double.infinity,
                   height: 48,
                   child: FilledButton.icon(
-                    onPressed: (_saving || _loadingRecipe) ? null : _save,
+                    onPressed:
+                        (_saving || _loadingRecipe || _importing) ? null : _save,
                     icon: _saving
                         ? const SizedBox(
                             width: 18,

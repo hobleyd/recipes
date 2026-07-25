@@ -13,6 +13,12 @@ class EpubPage {
   String get filename => href.split('/').last.replaceAll('.xhtml', '');
 
   @override
+  bool operator ==(Object other) => other is EpubPage && other.href == href;
+
+  @override
+  int get hashCode => href.hashCode;
+
+  @override
   String toString() => title;
 }
 

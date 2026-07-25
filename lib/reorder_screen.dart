@@ -1,7 +1,12 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'add_recipe_screen.dart';
 import 'epub_service.dart';
 import 'models.dart';
+import 'ocr_settings_dialog.dart';
 import 'providers.dart';
 
 class ReorderScreen extends ConsumerStatefulWidget {
@@ -18,10 +23,15 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
   String? _error;
   bool _saved = false;
 
+  // True when there are reorder/rename/delete edits that haven't been saved
+  // to the epub yet. Used to make sure we don't lose them when jumping into
+  // the add/edit/import screen from a row action.
+  bool _dirty = false;
+
   final _rightScrollController = ScrollController();
 
   // Heights used to estimate scroll offsets (chapter header vs recipe tile).
-  static const _chapterHeaderH = 28.0;
+  static const _chapterHeaderH = 40.0;
   static const _recipeTileH = 56.0;
 
   @override
@@ -96,18 +106,60 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     return chapters;
   }
 
+  // The page a newly-added recipe should be inserted after when "Add" is
+  // triggered from a chapter header row: the chapter's own last page, or
+  // failing that, the last page of the nearest preceding non-empty chapter.
+  EpubPage? _insertionAnchorForChapter(EpubChapter ch) {
+    if (ch.pages.isNotEmpty) return ch.pages.last;
+    final idx = _chapters!.indexOf(ch);
+    for (var i = idx - 1; i >= 0; i--) {
+      if (_chapters![i].pages.isNotEmpty) return _chapters![i].pages.last;
+    }
+    return null;
+  }
+
+  // The page a newly-imported recipe should be inserted after so it lands
+  // as the first recipe of the given chapter: the last page of the nearest
+  // preceding non-empty chapter (or null if nothing precedes it).
+  EpubPage? _startAnchorForChapter(EpubChapter ch) {
+    final idx = _chapters!.indexOf(ch);
+    for (var i = idx - 1; i >= 0; i--) {
+      if (_chapters![i].pages.isNotEmpty) return _chapters![i].pages.last;
+    }
+    return null;
+  }
+
+  int _chapterIndexContainingPage(EpubPage page) {
+    for (var i = 0; i < _chapters!.length; i++) {
+      if (_chapters![i].pages.any((p) => p.href == page.href)) return i;
+    }
+    return _chapters!.length - 1;
+  }
+
   Future<void> _addChapterDialog() async {
     final name = await _promptChapterName(title: 'Add Chapter', confirm: 'Add');
     if (name != null) {
       setState(() {
         _chapters!.add(EpubChapter(title: name, pages: []));
         _saved = false;
+        _dirty = true;
       });
     }
   }
 
-  Future<void> _renameChapterDialog(int idx) async {
-    final ch = _chapters![idx];
+  Future<void> _addChapterAfterIndex(int idx) async {
+    final name = await _promptChapterName(title: 'Add Chapter', confirm: 'Add');
+    if (name != null) {
+      setState(() {
+        _chapters!.insert(idx + 1, EpubChapter(title: name, pages: []));
+        _saved = false;
+        _dirty = true;
+      });
+    }
+  }
+
+  Future<void> _renameChapterDialog(EpubChapter ch) async {
+    final idx = _chapters!.indexOf(ch);
     final name = await _promptChapterName(
         title: 'Rename Chapter',
         initial: ch.title ?? '',
@@ -116,22 +168,26 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
       setState(() {
         _chapters![idx] = EpubChapter(title: name, pages: ch.pages);
         _saved = false;
+        _dirty = true;
       });
     }
   }
 
-  void _deleteChapter(int idx) {
+  void _deleteChapter(EpubChapter ch) {
     setState(() {
-      final ch = _chapters!.removeAt(idx);
-      if (ch.pages.isNotEmpty) {
+      final idx = _chapters!.indexOf(ch);
+      final removed = _chapters!.removeAt(idx);
+      if (removed.pages.isNotEmpty) {
         final unchapteredIdx = _chapters!.indexWhere((c) => c.title == null);
         if (unchapteredIdx >= 0) {
-          _chapters![unchapteredIdx].pages.insertAll(0, ch.pages);
+          _chapters![unchapteredIdx].pages.insertAll(0, removed.pages);
         } else {
-          _chapters!.insert(0, EpubChapter(title: null, pages: List.of(ch.pages)));
+          _chapters!
+              .insert(0, EpubChapter(title: null, pages: List.of(removed.pages)));
         }
       }
       _saved = false;
+      _dirty = true;
     });
   }
 
@@ -163,6 +219,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
         }
         _deletedPages.add(page);
         _saved = false;
+        _dirty = true;
       });
     }
   }
@@ -212,6 +269,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
       setState(() {
         _saving = false;
         _saved = true;
+        _dirty = false;
         _deletedPages.clear();
       });
     } catch (e) {
@@ -222,6 +280,208 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     }
   }
 
+  // Navigates to the add/edit/import screen, saving any pending reorder
+  // edits first so they aren't lost, then refreshes once we come back.
+  Future<void> _openRecipeEditor({
+    EpubPage? insertAfter,
+    EpubPage? editingPage,
+    String? autoImportAction,
+  }) async {
+    if (_dirty) {
+      await _save();
+      if (_error != null) return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AddRecipeScreen(
+          initialInsertAfter: insertAfter,
+          initialEditingPage: editingPage,
+          autoImportAction: autoImportAction,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    ref.invalidate(epubPagesProvider);
+    setState(() {
+      _chapters = null;
+      _saved = false;
+      _dirty = false;
+    });
+  }
+
+  Future<void> _openInInkworm() async {
+    final path = ref.read(epubPathProvider).value;
+    if (path == null) return;
+    try {
+      final result = Platform.isMacOS
+          ? await Process.run('open', ['-b', 'au.com.sharpblue.inkworm', path])
+          : Platform.isWindows
+              ? await Process.run('inkworm.exe', [path])
+              : await Process.run('inkworm', [path]);
+      if (result.exitCode != 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Could not open Inkworm: ${result.stderr.toString().trim()}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open Inkworm: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showNewCookbookDialog() async {
+    final formKey = GlobalKey<FormState>();
+    final titleCtrl = TextEditingController();
+    String? imagePath;
+    String? imageName;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          title: const Text('New Cookbook'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 440),
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: titleCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      hintText: 'e.g. Smith Family Recipes',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) =>
+                        (v?.trim().isEmpty ?? true) ? 'Title is required' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.image_outlined),
+                          label: Text(
+                            imageName ?? 'Choose title page image…',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onPressed: () async {
+                            final file = await openFile(
+                              acceptedTypeGroups: [
+                                const XTypeGroup(
+                                  label: 'Images',
+                                  extensions: ['jpg', 'jpeg', 'png'],
+                                ),
+                              ],
+                            );
+                            if (file != null) {
+                              setDs(() {
+                                imagePath = file.path;
+                                imageName = file.name;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      if (imagePath != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.clear),
+                          tooltip: 'Remove image',
+                          onPressed: () => setDs(() {
+                            imagePath = null;
+                            imageName = null;
+                          }),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(ctx, true);
+                }
+              },
+              child: const Text('Choose location…'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final title = titleCtrl.text.trim();
+    titleCtrl.dispose();
+    if (confirmed != true || title.isEmpty) return;
+
+    if (!mounted) return;
+    final slug = title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final saveLocation = await getSaveLocation(
+      acceptedTypeGroups: [
+        const XTypeGroup(label: 'EPUB', extensions: ['epub']),
+      ],
+      suggestedName: '$slug.epub',
+    );
+    if (saveLocation == null) return;
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await EpubService.createCookbook(
+        path: saveLocation.path,
+        title: title,
+        coverImagePath: imagePath,
+      );
+
+      if (!mounted) return;
+      final openNow = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cookbook created'),
+          content: Text('"$title" is ready. Open it now?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Later'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Open'),
+            ),
+          ],
+        ),
+      );
+
+      if (openNow == true && mounted) {
+        await ref.read(epubPathProvider.notifier).setPath(saveLocation.path);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Failed to create cookbook: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pagesAsync = ref.watch(epubPagesProvider);
@@ -229,7 +489,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reorder — Recipe Manager'),
+        title: const Text('Recipe Manager'),
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
         actions: [
@@ -252,6 +512,59 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
             ),
             const SizedBox(width: 12),
           ],
+          IconButton(
+            icon: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.asset(
+                'assets/inkworm_icon.png',
+                width: 22,
+                height: 22,
+              ),
+            ),
+            tooltip: 'View in Inkworm',
+            onPressed: _openInInkworm,
+          ),
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              if (value == 'change') {
+                ref.read(epubPathProvider.notifier).clearPath();
+              } else if (value == 'new_cookbook') {
+                await _showNewCookbookDialog();
+              } else if (value == 'llm_settings') {
+                await showOcrSettingsDialog(context, ref);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'new_cookbook',
+                child: Row(children: [
+                  Icon(Icons.auto_stories_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('New cookbook…'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'change',
+                child: Row(children: [
+                  Icon(Icons.folder_open_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Open EPUB file…'),
+                ]),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'llm_settings',
+                child: Row(children: [
+                  Icon(Icons.settings_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('LLM Settings…'),
+                ]),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: pagesAsync.when(
@@ -339,6 +652,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                 final item = chapters.removeAt(oldIdx);
                 chapters.insert(newIdx, item);
                 _saved = false;
+                _dirty = true;
               });
             },
             itemBuilder: (context, idx) {
@@ -364,14 +678,14 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                       IconButton(
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         tooltip: 'Rename chapter',
-                        onPressed: () => _renameChapterDialog(idx),
+                        onPressed: () => _renameChapterDialog(ch),
                         constraints: const BoxConstraints(),
                         padding: const EdgeInsets.symmetric(horizontal: 6),
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete_outline, size: 18),
                         tooltip: 'Delete chapter',
-                        onPressed: () => _deleteChapter(idx),
+                        onPressed: () => _deleteChapter(ch),
                         constraints: const BoxConstraints(),
                         padding: const EdgeInsets.symmetric(horizontal: 6),
                       ),
@@ -398,9 +712,130 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     );
   }
 
-  // Right panel — flat list of chapter headers (non-draggable) and recipes
-  // (draggable). Dragging a recipe past a chapter header moves it to that
-  // chapter.
+  // Add button shown on every row — offers inserting a new recipe or a new
+  // chapter right after that row.
+  Widget _addPopupButton({
+    required VoidCallback onAddRecipe,
+    required VoidCallback onAddChapter,
+  }) {
+    return PopupMenuButton<String>(
+      tooltip: 'Add',
+      icon: const Icon(Icons.add, size: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      onSelected: (v) {
+        if (v == 'recipe') {
+          onAddRecipe();
+        } else if (v == 'chapter') {
+          onAddChapter();
+        }
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: 'recipe',
+          child: Row(children: [
+            Icon(Icons.restaurant_menu, size: 18),
+            SizedBox(width: 10),
+            Text('Add Recipe…'),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'chapter',
+          child: Row(children: [
+            Icon(Icons.menu_book_outlined, size: 18),
+            SizedBox(width: 10),
+            Text('Add Chapter…'),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  // Import button shown on recipe rows — offers importing a new recipe
+  // (via OCR/web scrape) inserted right after that row.
+  Widget _importPopupButton({
+    required String tooltip,
+    required VoidCallback onImage,
+    required VoidCallback onWeb,
+  }) {
+    return PopupMenuButton<String>(
+      tooltip: tooltip,
+      icon: const Icon(Icons.document_scanner_outlined, size: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      onSelected: (v) {
+        if (v == 'image_pdf') {
+          onImage();
+        } else if (v == 'web_page') {
+          onWeb();
+        }
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: 'image_pdf',
+          child: Row(children: [
+            Icon(Icons.image_outlined, size: 18),
+            SizedBox(width: 10),
+            Text('Import Image or PDF…'),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'web_page',
+          child: Row(children: [
+            Icon(Icons.language_outlined, size: 18),
+            SizedBox(width: 10),
+            Text('Import Web Page…'),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  // The same five action slots (Add, Edit, Import, Delete, drag handle) for
+  // both chapter-header and recipe rows, so their icons line up in columns.
+  // Pass null for onEdit/onDelete to show a disabled icon in that slot
+  // (e.g. the unchaptered header can't be renamed or deleted).
+  Widget _rowActions({
+    required VoidCallback onAddRecipe,
+    required VoidCallback onAddChapter,
+    required String editTooltip,
+    VoidCallback? onEdit,
+    required String importTooltip,
+    required VoidCallback onImportImage,
+    required VoidCallback onImportWeb,
+    required String deleteTooltip,
+    VoidCallback? onDelete,
+    required int dragIndex,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _addPopupButton(onAddRecipe: onAddRecipe, onAddChapter: onAddChapter),
+        IconButton(
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          tooltip: editTooltip,
+          onPressed: onEdit,
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+        ),
+        _importPopupButton(
+            tooltip: importTooltip, onImage: onImportImage, onWeb: onImportWeb),
+        IconButton(
+          icon: const Icon(Icons.delete_outline, size: 18),
+          tooltip: deleteTooltip,
+          onPressed: onDelete,
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+        ),
+        ReorderableDragStartListener(
+          index: dragIndex,
+          child: const Icon(Icons.drag_handle, size: 18),
+        ),
+      ],
+    );
+  }
+
+  // Right panel — flat list of chapter headers and recipes, all draggable.
+  // Dragging a chapter header moves it and all of its recipes as one block.
+  // Dragging a recipe past a chapter header moves it to that chapter.
   Widget _buildFlatRecipeList(ColorScheme cs) {
     final flat = _buildFlatItems();
     return Column(
@@ -423,74 +858,85 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
             scrollController: _rightScrollController,
             buildDefaultDragHandles: false,
             itemCount: flat.length,
-            onReorder: (oldIdx, newIdx) {
-              setState(() {
-                if (newIdx > oldIdx) newIdx--;
-                // Recompute so we always work from current _chapters state.
-                final mutable = _buildFlatItems();
-                // Chapter headers are not draggable; guard just in case.
-                if (mutable[oldIdx] is EpubChapter) return;
-                final item = mutable.removeAt(oldIdx);
-                // If the insertion point lands on a chapter header, advance
-                // past it so the recipe lands inside that chapter — but only
-                // when the preceding item is a recipe (not another header).
-                // Two consecutive headers means an empty chapter: stay put so
-                // the recipe drops into the empty chapter, not the one after.
-                var insertIdx = newIdx.clamp(0, mutable.length);
-                if (insertIdx < mutable.length &&
-                    mutable[insertIdx] is EpubChapter &&
-                    (insertIdx == 0 ||
-                        mutable[insertIdx - 1] is! EpubChapter)) {
-                  insertIdx++;
-                }
-                mutable.insert(insertIdx, item);
-                _chapters = _rebuildChapters(mutable);
-                _saved = false;
-              });
-            },
+            onReorder: _onFlatReorder,
             itemBuilder: (context, idx) {
               final item = flat[idx];
               if (item is EpubChapter) {
                 return Container(
                   key: ValueKey(
                       'ch_${item.title ?? "unchaptered_$idx"}'),
-                  height: _chapterHeaderH,
+                  constraints:
+                      const BoxConstraints(minHeight: _chapterHeaderH),
                   color: cs.surfaceContainerHighest,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    item.title?.toUpperCase() ?? 'UNCHAPTERED',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.8,
-                      color: cs.primary,
-                    ),
+                  padding: const EdgeInsets.only(left: 16, right: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.title?.toUpperCase() ?? 'UNCHAPTERED',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                            color: cs.primary,
+                          ),
+                        ),
+                      ),
+                      _rowActions(
+                        onAddRecipe: () => _openRecipeEditor(
+                            insertAfter: _insertionAnchorForChapter(item)),
+                        onAddChapter: () =>
+                            _addChapterAfterIndex(_chapters!.indexOf(item)),
+                        editTooltip: 'Rename chapter',
+                        onEdit: item.title != null
+                            ? () => _renameChapterDialog(item)
+                            : null,
+                        importTooltip: 'Import recipe into this chapter',
+                        onImportImage: () => _openRecipeEditor(
+                            insertAfter: _startAnchorForChapter(item),
+                            autoImportAction: 'image_pdf'),
+                        onImportWeb: () => _openRecipeEditor(
+                            insertAfter: _startAnchorForChapter(item),
+                            autoImportAction: 'web_page'),
+                        deleteTooltip: 'Delete chapter',
+                        onDelete: item.title != null
+                            ? () => _deleteChapter(item)
+                            : null,
+                        dragIndex: idx,
+                      ),
+                    ],
                   ),
                 );
               }
               final page = item as EpubPage;
-              return SizedBox(
+              return Container(
                 key: ValueKey(page.href),
-                height: _recipeTileH,
-                child: ListTile(
-                  title: Text(page.title),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18),
-                        tooltip: 'Delete recipe',
-                        onPressed: () => _deletePageDialog(page),
-                        constraints: const BoxConstraints(),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                      ),
-                      ReorderableDragStartListener(
-                        index: idx,
-                        child: const Icon(Icons.drag_handle),
-                      ),
-                    ],
-                  ),
+                constraints: const BoxConstraints(minHeight: _recipeTileH),
+                padding: const EdgeInsets.only(left: 16, right: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(page.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge),
+                    ),
+                    _rowActions(
+                      onAddRecipe: () =>
+                          _openRecipeEditor(insertAfter: page),
+                      onAddChapter: () => _addChapterAfterIndex(
+                          _chapterIndexContainingPage(page)),
+                      editTooltip: 'Edit recipe',
+                      onEdit: () => _openRecipeEditor(editingPage: page),
+                      importTooltip: 'Import recipe after this recipe',
+                      onImportImage: () => _openRecipeEditor(
+                          insertAfter: page, autoImportAction: 'image_pdf'),
+                      onImportWeb: () => _openRecipeEditor(
+                          insertAfter: page, autoImportAction: 'web_page'),
+                      deleteTooltip: 'Delete recipe',
+                      onDelete: () => _deletePageDialog(page),
+                      dragIndex: idx,
+                    ),
+                  ],
                 ),
               );
             },
@@ -498,5 +944,48 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
         ),
       ],
     );
+  }
+
+  void _onFlatReorder(int oldIdx, int newIdx) {
+    final mutable = _buildFlatItems();
+    final movingItem = mutable[oldIdx];
+
+    if (movingItem is EpubChapter) {
+      // Move the header together with all the recipes that belong to it.
+      var end = oldIdx + 1;
+      while (end < mutable.length && mutable[end] is! EpubChapter) {
+        end++;
+      }
+      if (newIdx > oldIdx && newIdx < end) {
+        return; // dropped inside its own block — no-op
+      }
+      final blockLen = end - oldIdx;
+      final block = mutable.sublist(oldIdx, end);
+      mutable.removeRange(oldIdx, end);
+      var insertIdx = newIdx > oldIdx ? newIdx - blockLen : newIdx;
+      insertIdx = insertIdx.clamp(0, mutable.length);
+      mutable.insertAll(insertIdx, block);
+    } else {
+      if (newIdx > oldIdx) newIdx--;
+      final item = mutable.removeAt(oldIdx);
+      // If the insertion point lands on a chapter header, advance past it
+      // so the recipe lands inside that chapter — but only when the
+      // preceding item is a recipe (not another header). Two consecutive
+      // headers means an empty chapter: stay put so the recipe drops into
+      // the empty chapter, not the one after.
+      var insertIdx = newIdx.clamp(0, mutable.length);
+      if (insertIdx < mutable.length &&
+          mutable[insertIdx] is EpubChapter &&
+          (insertIdx == 0 || mutable[insertIdx - 1] is! EpubChapter)) {
+        insertIdx++;
+      }
+      mutable.insert(insertIdx, item);
+    }
+
+    setState(() {
+      _chapters = _rebuildChapters(mutable);
+      _saved = false;
+      _dirty = true;
+    });
   }
 }
