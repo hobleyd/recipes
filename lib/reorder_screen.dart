@@ -303,8 +303,10 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     );
     if (!mounted) return;
     ref.invalidate(epubPagesProvider);
+    final pages = await ref.read(epubPagesProvider.future);
+    if (!mounted) return;
     setState(() {
-      _chapters = null;
+      _chapters = _buildChapters(pages);
       _saved = false;
       _dirty = false;
     });
