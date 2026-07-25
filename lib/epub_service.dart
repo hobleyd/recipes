@@ -774,8 +774,8 @@ $methodHtml</body>
 
     // Find chapter titles that already have a standalone title page (body is
     // just <h1 class="title">…</h1>), so we don't create duplicates on
-    // subsequent saves.
-    final existingTitleTitles = <String>{};
+    // subsequent saves. Keyed by title → the file's fileMap key.
+    final existingTitlePages = <String, String>{};
     for (final entry in fileMap.entries) {
       if (!entry.key.startsWith('OEBPS/Text/') ||
           !entry.key.endsWith('.xhtml')) { continue; }
@@ -787,7 +787,7 @@ $methodHtml</body>
       final h1M =
           RegExp(r'^<h1[^>]*>(.*?)</h1>$', dotAll: true).firstMatch(inner);
       if (h1M != null) {
-        existingTitleTitles.add(_unescXml(h1M.group(1)!.trim()));
+        existingTitlePages[_unescXml(h1M.group(1)!.trim())] = entry.key;
       }
     }
 
@@ -798,7 +798,7 @@ $methodHtml</body>
     final newTitlePageHrefs = <String, String>{}; // chapter title → Text/…xhtml href
     for (final ch in chapters) {
       if (ch.title == null || ch.pages.isEmpty) continue;
-      if (existingTitleTitles.contains(ch.title)) continue;
+      if (existingTitlePages.containsKey(ch.title)) continue;
 
       var slug = ch.title!.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
       if (slug.isEmpty) slug = 'chapter';
@@ -817,6 +817,53 @@ $methodHtml</body>
       );
       newTitlePageIds[ch.title!] = '$filename.xhtml';
       newTitlePageHrefs[ch.title!] = '$filename.xhtml';
+    }
+
+    // Chapters whose title page still exists but no longer has any pages
+    // (recipes were moved out, or the chapter itself was removed) leave a
+    // dead file behind — the app can never see it again since it drops out
+    // of the spine/TOC below (and, for old books, may have been left behind
+    // by tooling that predates this app). Prune it now instead of letting
+    // it accumulate as an invisible orphan. Front/back matter that happens
+    // to share the same bare "<h1 class=title>" shape (cover, index splits,
+    // attributions) is protected by name so it's never touched.
+    final keepTitlePages = {
+      for (final ch in chapters)
+        if (ch.title != null && ch.pages.isNotEmpty) ch.title!
+    };
+    for (final entry in existingTitlePages.entries) {
+      if (keepTitlePages.contains(entry.key)) continue;
+      final relHref = entry.value.substring('OEBPS/'.length);
+      final filename = relHref.split('/').last;
+      if (filename == 'titlepage.xhtml' ||
+          filename == 'attributions.xhtml' ||
+          RegExp(r'^index_split_\d+\.xhtml$').hasMatch(filename)) {
+        continue;
+      }
+
+      // Find the manifest id for this href before removing the <item>, so
+      // the matching spine <itemref> can be dropped too — otherwise the
+      // spine is left pointing at a manifest item that no longer exists,
+      // producing a broken epub.
+      final itemMatch = RegExp(
+              '<item\\b[^>]*\\bhref="${RegExp.escape(relHref)}"[^>]*/>')
+          .firstMatch(opf);
+      final manifestId = itemMatch == null
+          ? null
+          : RegExp(r'\bid="([^"]+)"').firstMatch(itemMatch.group(0)!)?.group(1);
+
+      fileMap.remove(entry.value);
+      opf = opf.replaceFirst(
+        RegExp('\\s*<item\\b[^>]*\\bhref="${RegExp.escape(relHref)}"[^>]*/>'),
+        '',
+      );
+      if (manifestId != null) {
+        opf = opf.replaceFirst(
+          RegExp(
+              '\\s*<itemref\\b[^>]*\\bidref="${RegExp.escape(manifestId)}"[^>]*/>'),
+          '',
+        );
+      }
     }
 
     opf = _reorderSpine(opf, chapters, newTitlePageIds);
