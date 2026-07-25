@@ -10,6 +10,10 @@ A Flutter desktop app for managing a personal recipe ebook. It reads and writes 
 - **Reorder recipes and chapters** — a two-panel drag-and-drop screen lets you reorder chapters on the left and drag individual recipes between chapters on the right.
 - **Chapter management** — add new chapters, rename existing ones, delete them (recipes are moved to the unchaptered group), and drag them into any order. New chapters are written as proper chapter title pages in the EPUB.
 - **Import from a web page** — paste a recipe URL and the app fetches the page and uses your configured LLM to parse it into a new recipe, ready to review and edit. LLM settings support separate vision and text models, since a single Ollama model rarely does both well.
+- **Import from pasted text** — paste any recipe text (e.g. copied from an email or note) and the app uses your configured LLM to parse it into a new recipe.
+- **Reorder screen as the main hub** — the app opens straight into the chapter/recipe reorder screen, with add, edit, import, and delete actions available directly on each row.
+- **Delete recipes from the reorder screen** — remove a recipe directly from the reorder list, without opening it first.
+- **Open in Inkworm** — a toolbar button launches the sibling Inkworm ePub reader with the currently open book.
 
 ## Architecture
 
