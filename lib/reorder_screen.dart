@@ -487,6 +487,16 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     final pagesAsync = ref.watch(epubPagesProvider);
     final cs = Theme.of(context).colorScheme;
 
+    // Populate _chapters before the appBar is built below, not inside the
+    // body's data callback — otherwise the appBar (which gates the Save
+    // Order button on _chapters != null) is constructed with the stale
+    // pre-load value and the button doesn't appear until some later
+    // unrelated rebuild.
+    final loadedPages = pagesAsync.value;
+    if (loadedPages != null) {
+      _chapters ??= _buildChapters(loadedPages);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recipe Manager'),
