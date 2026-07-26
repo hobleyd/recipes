@@ -276,8 +276,8 @@ class EpubService {
             ' id="citation-$footnoteNum" class="citation">*</a></sup>'
         : '';
 
-    final descHtml = _toParagraphs(description);
-    final methodHtml = _toParagraphs(method);
+    final descHtml = _normalizeToXhtml(description);
+    final methodHtml = _normalizeToXhtml(method);
     final tablesHtml = _buildTablesHtml(ingredientSections);
 
     return '''<?xml version="1.0" encoding="utf-8"?>
@@ -294,9 +294,23 @@ class EpubService {
 <body>
   <h2 class="recipe-title"><span id="anchor$anchorNum" class="calibre1"></span>${_escXml(title)}$citation</h2>
 
-$descHtml$tablesHtml
-$methodHtml</body>
+  $descHtml
+
+$tablesHtml  $methodHtml
+</body>
 </html>''';
+  }
+
+  /// The rich text editor hands back browser-serialized HTML5. Browser DOM
+  /// serialization already guarantees well-nested tags and escaped text, so
+  /// the only gap against the XHTML 1.1 doctype above is that void elements
+  /// (`<br>`, `<img>`, `<hr>`) aren't self-closed — fix that so the epub
+  /// stays well-formed XML for e-reader engines that parse it strictly.
+  static String _normalizeToXhtml(String html) {
+    return html.trim().replaceAllMapped(
+          RegExp(r'<(br|img|hr)\b([^>]*?)\s*/?>', caseSensitive: false),
+          (m) => '<${m.group(1)}${m.group(2)}/>',
+        );
   }
 
   String _buildTablesHtml(List<IngredientSection> sections) {
@@ -323,16 +337,6 @@ $methodHtml</body>
           '  </table>\n\n');
     }
     return sb.toString();
-  }
-
-  String _toParagraphs(String text) {
-    final paras = text
-        .split(RegExp(r'\n\s*\n'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (paras.isEmpty) return '';
-    return '${paras.map((p) => '  <p>${_escXml(p)}</p>').join('\n\n')}\n';
   }
 
   String _ingredientRows(List<Ingredient> ingredients) {
@@ -475,12 +479,13 @@ $methodHtml</body>
     final firstTableOrH3 = RegExp(r'<(?:table|h3)\b').firstMatch(body);
     final lastTableEnd = body.lastIndexOf('</table>');
 
-    final description = _parseParagraphs(firstTableOrH3 != null
-        ? body.substring(0, firstTableOrH3.start)
-        : (lastTableEnd < 0 ? body : ''));
+    final description = (firstTableOrH3 != null
+            ? body.substring(0, firstTableOrH3.start)
+            : (lastTableEnd < 0 ? body : ''))
+        .trim();
 
-    final method = _parseParagraphs(
-        lastTableEnd >= 0 ? body.substring(lastTableEnd + 8) : '');
+    final method =
+        (lastTableEnd >= 0 ? body.substring(lastTableEnd + 8) : '').trim();
 
     final sections = <IngredientSection>[];
     if (firstTableOrH3 != null && lastTableEnd >= 0) {
@@ -532,15 +537,6 @@ $methodHtml</body>
       anchorNum: anchorNum,
       footnoteNum: footnoteNum,
     );
-  }
-
-  String _parseParagraphs(String html) {
-    final paras = RegExp(r'<p[^>]*>(.*?)</p>', dotAll: true)
-        .allMatches(html)
-        .map((m) => _unescXml(m.group(1)!.trim()))
-        .where((t) => t.isNotEmpty)
-        .toList();
-    return paras.join('\n\n');
   }
 
   List<Ingredient> _parseTableIngredients(String tableHtml) {

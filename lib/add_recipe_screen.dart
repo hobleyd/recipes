@@ -1,6 +1,7 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sharpblue_library/sharpblue_library.dart';
 import 'epub_service.dart';
 import 'measurement_converter.dart';
 import 'models.dart';
@@ -106,10 +107,13 @@ class AddRecipeScreen extends ConsumerStatefulWidget {
 class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  final _methodCtrl = TextEditingController();
+  final _descEditorKey = GlobalKey<RichTextEditorState>();
+  final _methodEditorKey = GlobalKey<RichTextEditorState>();
   final _footnoteCtrl = TextEditingController();
   final _scrollController = ScrollController();
+
+  String _descHtml = '';
+  String _methodHtml = '';
 
   _Mode _mode = _Mode.add;
   EpubPage? _insertAfter;
@@ -150,8 +154,6 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _descCtrl.dispose();
-    _methodCtrl.dispose();
     _footnoteCtrl.dispose();
     _scrollController.dispose();
     for (final t in _tables) {
@@ -162,8 +164,10 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
 
   void _populateForm(RecipeData data) {
     _titleCtrl.text = data.title;
-    _descCtrl.text = data.description;
-    _methodCtrl.text = data.method;
+    _descHtml = data.description;
+    _methodHtml = data.method;
+    _descEditorKey.currentState?.setContent(data.description);
+    _methodEditorKey.currentState?.setContent(data.method);
     _footnoteCtrl.text = data.footnote;
 
     for (final t in _tables) {
@@ -448,6 +452,21 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
 
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
+    final descHtml =
+        await _descEditorKey.currentState?.getContent() ?? _descHtml;
+    final methodHtml =
+        await _methodEditorKey.currentState?.getContent() ?? _methodHtml;
+    if (_isHtmlEmpty(descHtml)) {
+      setState(() => _error = 'Description is required');
+      return;
+    }
+    if (_isHtmlEmpty(methodHtml)) {
+      setState(() => _error = 'Method is required');
+      return;
+    }
+    _descHtml = descHtml;
+    _methodHtml = methodHtml;
+
     setState(() => _saving = true);
 
     try {
@@ -456,17 +475,17 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
         await EpubService(path).updateRecipe(
           page: _editingPage!,
           title: _titleCtrl.text.trim(),
-          description: _descCtrl.text.trim(),
+          description: descHtml,
           ingredientSections: _tables.map((t) => t.toSection()).toList(),
-          method: _methodCtrl.text.trim(),
+          method: methodHtml,
           footnote: _footnoteCtrl.text.trim(),
         );
       } else {
         await EpubService(path).saveRecipe(
           title: _titleCtrl.text.trim(),
-          description: _descCtrl.text.trim(),
+          description: descHtml,
           ingredientSections: _tables.map((t) => t.toSection()).toList(),
-          method: _methodCtrl.text.trim(),
+          method: methodHtml,
           footnote: _footnoteCtrl.text.trim(),
           insertAfterPage: _insertAfter!,
         );
@@ -604,17 +623,12 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
                       (v?.trim().isEmpty ?? true) ? 'Title is required' : null,
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: _descCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    hintText: 'Short intro — where it came from, who loves it…',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  maxLines: 4,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Description is required' : null,
+                _richTextField(
+                  label: 'Description',
+                  hint: 'Short intro — where it came from, who loves it…',
+                  editorKey: _descEditorKey,
+                  initialHtml: _descHtml,
+                  height: 140,
                 ),
                 const SizedBox(height: 28),
 
@@ -680,18 +694,12 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
 
                 _sectionLabel('Method'),
                 const SizedBox(height: 8),
-                TextFormField(
-                  controller: _methodCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Method',
-                    hintText:
-                        'Cooking steps. Leave a blank line between paragraphs.',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  maxLines: 10,
-                  validator: (v) =>
-                      (v?.trim().isEmpty ?? true) ? 'Method is required' : null,
+                _richTextField(
+                  label: 'Method',
+                  hint: 'Cooking steps.',
+                  editorKey: _methodEditorKey,
+                  initialHtml: _methodHtml,
+                  height: 320,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -918,6 +926,53 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     }
     return items;
   }
+
+  Widget _richTextField({
+    required String label,
+    required String hint,
+    required GlobalKey<RichTextEditorState> editorKey,
+    required String initialHtml,
+    required double height,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          height: height,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            border: Border.all(color: cs.outline),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: RichTextEditor(
+            key: editorKey,
+            initialHtml: initialHtml,
+            onContentChanged: (_) {},
+          ),
+        ),
+        if (hint.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(hint,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant)),
+        ],
+      ],
+    );
+  }
+
+  bool _isHtmlEmpty(String html) =>
+      html.replaceAll(RegExp(r'<[^>]*>'), '').trim().isEmpty;
 
   Widget _sectionLabel(String text) {
     return Text(

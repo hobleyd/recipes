@@ -105,15 +105,34 @@ RecipeData _parseRecipeJson(Map<String, dynamic> json) {
 
   return RecipeData(
     title: (json['title'] as String?) ?? '',
-    description: (json['description'] as String?) ?? '',
+    description: _plainTextToHtmlParagraphs((json['description'] as String?) ?? ''),
     ingredientSections: sections.isNotEmpty
         ? sections
         : [IngredientSection(ingredients: [Ingredient()])],
-    method: (json['method'] as String?) ?? '',
+    method: _plainTextToHtmlParagraphs((json['method'] as String?) ?? ''),
     footnote: (json['footnote'] as String?) ?? '',
     anchorNum: 0,
   );
 }
+
+/// The AI extraction prompt asks for plain text with blank lines between
+/// paragraphs (see [_recipePrompt]), but [RecipeData.description] and
+/// [RecipeData.method] are HTML fed directly into the rich text editor —
+/// wrap each paragraph in a `<p>` so imported text displays the same way a
+/// saved recipe's would.
+String _plainTextToHtmlParagraphs(String text) {
+  final paras = text
+      .split(RegExp(r'\n\s*\n'))
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+  return paras.map((p) => '<p>${_escapeHtml(p)}</p>').join();
+}
+
+String _escapeHtml(String t) => t
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 
 RecipeData _extractAndParseJson(String text) {
   final jsonMatch = RegExp(r'\{.*\}', dotAll: true).firstMatch(text);
