@@ -650,28 +650,36 @@ $tablesHtml  $methodHtml
     }
     fileMap['OEBPS/Text/attributions.xhtml'] = utf8.encode(attr);
 
+    // Recipes added via this app get a navPoint id of "u$filename", but
+    // recipes originally imported from Calibre keep Calibre's UUID-based
+    // ids — so matching by id silently misses most of the library. Match
+    // by the <content src> (which every navPoint has) instead, scoped to
+    // the specific navPoint block and disambiguated by the old title, since
+    // a recipe's own entry can share its src with a preceding chapter-marker
+    // navPoint (whose <text> is a category label, not the recipe title).
     var toc = utf8.decode(fileMap['OEBPS/toc.ncx']!);
-    final navRe = RegExp(
-      'id="u${RegExp.escape(page.filename)}"[^>]*>.*?<text>([^<]*)</text>',
-      dotAll: true,
-    );
-    final navMatch = navRe.firstMatch(toc);
-    if (navMatch != null) {
-      toc = toc.replaceFirst(navMatch.group(1)!, _escXml(title));
+    final navPointRe = RegExp(r'<navPoint\b[^>]*>.*?</navPoint>', dotAll: true);
+    final oldTitleTag = '<text>${_escXml(page.title)}</text>';
+    for (final m in navPointRe.allMatches(toc)) {
+      final block = m.group(0)!;
+      if (block.contains('src="Text/${page.filename}.xhtml') && block.contains(oldTitleTag)) {
+        toc = toc.replaceFirst(block, block.replaceFirst(oldTitleTag, '<text>${_escXml(title)}</text>'));
+        break;
+      }
     }
     fileMap['OEBPS/toc.ncx'] = utf8.encode(toc);
 
+    // Same scoping concern as above: a recipe can appear more than once in
+    // the HTML TOC (e.g. a chapter listing plus a detail sub-entry), so
+    // replace within the matched anchor's own line only, not document-wide.
     var htmlToc =
         utf8.decode(fileMap['OEBPS/Text/index_split_001.xhtml']!);
     final anchorRef =
         '${page.filename}.xhtml#anchor$anchorNum';
     final linkRe =
-        RegExp('href="${RegExp.escape(anchorRef)}"[^>]*>([^<]*)');
-    final linkMatch = linkRe.firstMatch(htmlToc);
-    if (linkMatch != null) {
-      htmlToc = htmlToc.replaceFirst(
-          linkMatch.group(1)!, ' ${_escXml(title)}');
-    }
+        RegExp('(<a href="${RegExp.escape(anchorRef)}"[^>]*>)([^<]*)(</a>)');
+    htmlToc = htmlToc.replaceAllMapped(
+        linkRe, (m) => '${m.group(1)} ${_escXml(title)}${m.group(3)}');
     fileMap['OEBPS/Text/index_split_001.xhtml'] = utf8.encode(htmlToc);
 
     final newArchive = Archive();
