@@ -19,7 +19,9 @@ dependencies:
   shared_preferences: ^2.5.4
   xml: ^7.0.1
   sharpblue_library:
-    path: ../sharpblue-library
+    git:
+      url: https://github.com/hobleyd/sharpblue-library.git
+      ref: main
 
 dev_dependencies:
   flutter_test:
