@@ -480,6 +480,9 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
           method: methodHtml,
           footnote: _footnoteCtrl.text.trim(),
         );
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        return;
       } else {
         await EpubService(path).saveRecipe(
           title: _titleCtrl.text.trim(),
