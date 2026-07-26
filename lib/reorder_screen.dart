@@ -34,6 +34,10 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
   static const _chapterHeaderH = 40.0;
   static const _recipeTileH = 56.0;
 
+  // Extra right padding on each row so the drag handle doesn't sit under
+  // the list's scrollbar, which otherwise steals mouse drags meant for it.
+  static const _scrollbarGutter = 16.0;
+
   @override
   void dispose() {
     _rightScrollController.dispose();
@@ -880,7 +884,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                   constraints:
                       const BoxConstraints(minHeight: _chapterHeaderH),
                   color: cs.surfaceContainerHighest,
-                  padding: const EdgeInsets.only(left: 16, right: 4),
+                  padding: const EdgeInsets.only(
+                      left: 16, right: _scrollbarGutter),
                   child: Row(
                     children: [
                       Expanded(
@@ -926,7 +931,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
               return Container(
                 key: ValueKey(page.href),
                 constraints: const BoxConstraints(minHeight: _recipeTileH),
-                padding: const EdgeInsets.only(left: 16, right: 4),
+                padding:
+                    const EdgeInsets.only(left: 16, right: _scrollbarGutter),
                 child: Row(
                   children: [
                     Expanded(
