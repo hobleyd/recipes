@@ -866,7 +866,25 @@ $methodHtml</body>
       }
     }
 
-    opf = _reorderSpine(opf, chapters, newTitlePageIds);
+    // _reorderSpine needs to reposition every chapter's title page, not just
+    // ones created this save — build a single title → manifest id map
+    // covering both new and pre-existing title pages.
+    final titlePageIdByTitle = <String, String>{...newTitlePageIds};
+    final hrefToId = <String, String>{};
+    for (final m in RegExp(
+            r'<item\s[^>]*\bid="([^"]+)"[^>]*\bhref="([^"]+)"', dotAll: true)
+        .allMatches(opf)) {
+      hrefToId[m.group(2)!] = m.group(1)!;
+    }
+    for (final entry in existingTitlePages.entries) {
+      if (titlePageIdByTitle.containsKey(entry.key)) continue;
+      if (!keepTitlePages.contains(entry.key)) continue;
+      final relHref = entry.value.substring('OEBPS/'.length);
+      final id = hrefToId[relHref];
+      if (id != null) titlePageIdByTitle[entry.key] = id;
+    }
+
+    opf = _reorderSpine(opf, chapters, titlePageIdByTitle);
     fileMap['OEBPS/content.opf'] = utf8.encode(opf);
 
     var toc = utf8.decode(fileMap['OEBPS/toc.ncx']!);
@@ -893,7 +911,7 @@ $methodHtml</body>
   }
 
   String _reorderSpine(String opf, List<EpubChapter> chapters,
-      Map<String, String> newTitlePageIds) {
+      Map<String, String> titlePageIdByTitle) {
     final newOrder = [
       for (final ch in chapters)
         for (final page in ch.pages)
@@ -926,11 +944,24 @@ $methodHtml</body>
       offset += newTag.length - oldTag.length;
     }
 
-    // Insert new chapter title page itemrefs before the first recipe of each
-    // new chapter.
+    // Every chapter's title page — whether brand new or pre-existing — must
+    // sit immediately before its chapter's first recipe. A chapter that was
+    // simply reordered (not renamed) already has a title page itemref, but
+    // it's left behind at its old spine position by the id-swap above,
+    // which only ever touches recipe ids. Strip each known title page from
+    // wherever it currently sits first, then re-insert it at the correct
+    // spot below — otherwise a moved chapter's title page stays parked at
+    // its old location instead of following its recipes.
+    for (final titlePageId in titlePageIdByTitle.values) {
+      rebuilt = rebuilt.replaceFirst(
+        RegExp(
+            '\\s*<itemref\\b[^>]*\\bidref="${RegExp.escape(titlePageId)}"[^>]*/>'),
+        '',
+      );
+    }
     for (final ch in chapters) {
       if (ch.title == null || ch.pages.isEmpty) continue;
-      final titlePageId = newTitlePageIds[ch.title!];
+      final titlePageId = titlePageIdByTitle[ch.title!];
       if (titlePageId == null) continue;
       final firstRecipeId = ch.pages.first.id;
       if (firstRecipeId.isEmpty) continue;
