@@ -724,32 +724,34 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     );
   }
 
-  // Add button shown on every row — offers inserting a new recipe or a new
-  // chapter right after that row.
+  // Add button shown on every row — offers inserting a new recipe or chapter
+  // right after that row, or importing a recipe (via OCR/web scrape/pasted
+  // text) inserted right after that row. Each subsection is alphabetical.
   Widget _addPopupButton({
     required VoidCallback onAddRecipe,
     required VoidCallback onAddChapter,
+    required VoidCallback onImportImage,
+    required VoidCallback onImportWeb,
+    required VoidCallback onImportText,
   }) {
     return PopupMenuButton<String>(
       tooltip: 'Add',
       icon: const Icon(Icons.add, size: 18),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       onSelected: (v) {
-        if (v == 'recipe') {
-          onAddRecipe();
-        } else if (v == 'chapter') {
+        if (v == 'chapter') {
           onAddChapter();
+        } else if (v == 'recipe') {
+          onAddRecipe();
+        } else if (v == 'image_pdf') {
+          onImportImage();
+        } else if (v == 'text') {
+          onImportText();
+        } else if (v == 'web_page') {
+          onImportWeb();
         }
       },
       itemBuilder: (_) => const [
-        PopupMenuItem(
-          value: 'recipe',
-          child: Row(children: [
-            Icon(Icons.restaurant_menu, size: 18),
-            SizedBox(width: 10),
-            Text('Add Recipe…'),
-          ]),
-        ),
         PopupMenuItem(
           value: 'chapter',
           child: Row(children: [
@@ -758,46 +760,21 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
             Text('Add Chapter…'),
           ]),
         ),
-      ],
-    );
-  }
-
-  // Import button shown on recipe rows — offers importing a new recipe
-  // (via OCR/web scrape) inserted right after that row.
-  Widget _importPopupButton({
-    required String tooltip,
-    required VoidCallback onImage,
-    required VoidCallback onWeb,
-    required VoidCallback onText,
-  }) {
-    return PopupMenuButton<String>(
-      tooltip: tooltip,
-      icon: const Icon(Icons.document_scanner_outlined, size: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      onSelected: (v) {
-        if (v == 'image_pdf') {
-          onImage();
-        } else if (v == 'web_page') {
-          onWeb();
-        } else if (v == 'text') {
-          onText();
-        }
-      },
-      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: 'recipe',
+          child: Row(children: [
+            Icon(Icons.restaurant_menu, size: 18),
+            SizedBox(width: 10),
+            Text('Add Recipe…'),
+          ]),
+        ),
+        PopupMenuDivider(),
         PopupMenuItem(
           value: 'image_pdf',
           child: Row(children: [
             Icon(Icons.image_outlined, size: 18),
             SizedBox(width: 10),
             Text('Import Image or PDF…'),
-          ]),
-        ),
-        PopupMenuItem(
-          value: 'web_page',
-          child: Row(children: [
-            Icon(Icons.language_outlined, size: 18),
-            SizedBox(width: 10),
-            Text('Import Web Page…'),
           ]),
         ),
         PopupMenuItem(
@@ -808,20 +785,27 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
             Text('Import Text…'),
           ]),
         ),
+        PopupMenuItem(
+          value: 'web_page',
+          child: Row(children: [
+            Icon(Icons.language_outlined, size: 18),
+            SizedBox(width: 10),
+            Text('Import Web Page…'),
+          ]),
+        ),
       ],
     );
   }
 
-  // The same five action slots (Add, Edit, Import, Delete, drag handle) for
-  // both chapter-header and recipe rows, so their icons line up in columns.
-  // Pass null for onEdit/onDelete to show a disabled icon in that slot
-  // (e.g. the unchaptered header can't be renamed or deleted).
+  // The same four action slots (Add, Edit, Delete, drag handle) for both
+  // chapter-header and recipe rows, so their icons line up in columns. Pass
+  // null for onEdit/onDelete to show a disabled icon in that slot (e.g. the
+  // unchaptered header can't be renamed or deleted).
   Widget _rowActions({
     required VoidCallback onAddRecipe,
     required VoidCallback onAddChapter,
     required String editTooltip,
     VoidCallback? onEdit,
-    required String importTooltip,
     required VoidCallback onImportImage,
     required VoidCallback onImportWeb,
     required VoidCallback onImportText,
@@ -832,7 +816,13 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _addPopupButton(onAddRecipe: onAddRecipe, onAddChapter: onAddChapter),
+        _addPopupButton(
+          onAddRecipe: onAddRecipe,
+          onAddChapter: onAddChapter,
+          onImportImage: onImportImage,
+          onImportWeb: onImportWeb,
+          onImportText: onImportText,
+        ),
         IconButton(
           icon: const Icon(Icons.edit_outlined, size: 18),
           tooltip: editTooltip,
@@ -840,11 +830,6 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
           constraints: const BoxConstraints(),
           padding: const EdgeInsets.symmetric(horizontal: 6),
         ),
-        _importPopupButton(
-            tooltip: importTooltip,
-            onImage: onImportImage,
-            onWeb: onImportWeb,
-            onText: onImportText),
         IconButton(
           icon: const Icon(Icons.delete_outline, size: 18),
           tooltip: deleteTooltip,
@@ -918,7 +903,6 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                         onEdit: item.title != null
                             ? () => _renameChapterDialog(item)
                             : null,
-                        importTooltip: 'Import recipe into this chapter',
                         onImportImage: () => _openRecipeEditor(
                             insertAfter: _startAnchorForChapter(item),
                             autoImportAction: 'image_pdf'),
@@ -957,7 +941,6 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                           _chapterIndexContainingPage(page)),
                       editTooltip: 'Edit recipe',
                       onEdit: () => _openRecipeEditor(editingPage: page),
-                      importTooltip: 'Import recipe after this recipe',
                       onImportImage: () => _openRecipeEditor(
                           insertAfter: page, autoImportAction: 'image_pdf'),
                       onImportWeb: () => _openRecipeEditor(
