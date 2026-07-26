@@ -524,7 +524,7 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Save Order'),
+                  : const Text('Save'),
             ),
             const SizedBox(width: 12),
           ],
