@@ -6,6 +6,7 @@ A Flutter desktop app for managing a personal recipe ebook. It reads and writes 
 
 - **Add recipes** — fill in a title, description, ingredients (with optional labelled sections), method, and footnote, then choose where in the book to insert the new recipe.
 - **Edit recipes** — select any existing recipe from the book to load and modify it.
+- **Rich text formatting** — description and method fields use a WYSIWYG editor (bold, italic, underline, strikethrough, colour, lists, links) instead of plain text.
 - **Measurement conversion** — entering a quantity in imperial automatically fills in the metric equivalent (and vice versa), using built-in conversion rules.
 - **Reorder recipes and chapters** — a two-panel drag-and-drop screen lets you reorder chapters on the left and drag individual recipes between chapters on the right.
 - **Chapter management** — add new chapters, rename existing ones, delete them (recipes are moved to the unchaptered group), and drag them into any order. New chapters are written as proper chapter title pages in the EPUB.
