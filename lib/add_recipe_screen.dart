@@ -162,6 +162,17 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
     super.dispose();
   }
 
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() => _error = message);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
+
   void _populateForm(RecipeData data) {
     _titleCtrl.text = data.title;
     _descHtml = data.description;
@@ -205,7 +216,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       final data = await EpubService(path).loadRecipe(page);
       _populateForm(data);
     } catch (e) {
-      setState(() => _error = 'Could not load recipe: $e');
+      _showError('Could not load recipe: $e');
     } finally {
       setState(() => _loadingRecipe = false);
     }
@@ -253,7 +264,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       });
       _populateForm(data);
     } catch (e) {
-      setState(() => _error = 'Import failed: $e');
+      _showError('Import failed: $e');
     } finally {
       setState(() => _importing = false);
     }
@@ -348,7 +359,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       });
       _populateForm(data);
     } catch (e) {
-      setState(() => _error = 'Import failed: $e');
+      _showError('Import failed: $e');
     } finally {
       setState(() => _importing = false);
     }
@@ -438,7 +449,7 @@ class _AddRecipeScreenState extends ConsumerState<AddRecipeScreen> {
       });
       _populateForm(data);
     } catch (e) {
-      setState(() => _error = 'Import failed: $e');
+      _showError('Import failed: $e');
     } finally {
       setState(() => _importing = false);
     }

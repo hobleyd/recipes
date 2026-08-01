@@ -103,13 +103,22 @@ RecipeData _parseRecipeJson(Map<String, dynamic> json) {
     );
   }).toList();
 
+  final title = (json['title'] as String?) ?? '';
+  final method = (json['method'] as String?) ?? '';
+  final hasIngredients =
+      sections.any((s) => s.ingredients.any((i) => i.name.trim().isNotEmpty));
+  if (title.trim().isEmpty && method.trim().isEmpty && !hasIngredients) {
+    throw Exception(
+        'Could not find a recipe on that page — the extractor returned no usable content');
+  }
+
   return RecipeData(
-    title: (json['title'] as String?) ?? '',
+    title: title,
     description: _plainTextToHtmlParagraphs((json['description'] as String?) ?? ''),
     ingredientSections: sections.isNotEmpty
         ? sections
         : [IngredientSection(ingredients: [Ingredient()])],
-    method: _plainTextToHtmlParagraphs((json['method'] as String?) ?? ''),
+    method: _plainTextToHtmlParagraphs(method),
     footnote: (json['footnote'] as String?) ?? '',
     anchorNum: 0,
   );
@@ -159,6 +168,10 @@ Future<String> _fetchPageText(String url) async {
     throw Exception('Timed out fetching the web page');
   } on SocketException catch (e) {
     throw Exception('Could not reach $url ($e)');
+  } on HandshakeException catch (e) {
+    throw Exception(
+        'Secure connection to $url failed ($e) — this can happen if the '
+        'site redirects through a domain your network/DNS is blocking');
   }
 
   if (response.statusCode != 200) {
