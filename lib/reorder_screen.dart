@@ -286,16 +286,32 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
 
   // Navigates to the add/edit/import screen, saving any pending reorder
   // edits first so they aren't lost, then refreshes once we come back.
+  //
+  // `targetChapter` is passed when the recipe is meant to land in a specific
+  // chapter and that chapter has no pages yet. A brand-new empty chapter has
+  // no marker in the epub yet (reorderPages only creates one for non-empty
+  // chapters), so `insertAfter` had to fall back to the end of the nearest
+  // preceding chapter — meaning the new recipe lands there on disk. Once it's
+  // saved, move it into `targetChapter` in memory and save again so
+  // reorderPages creates the chapter's marker for real.
   Future<void> _openRecipeEditor({
     EpubPage? insertAfter,
     EpubPage? editingPage,
     String? autoImportAction,
+    EpubChapter? targetChapter,
   }) async {
     if (_dirty) {
       await _save();
       if (_error != null) return;
     }
     if (!mounted) return;
+
+    final needsChapterFixup =
+        targetChapter != null && targetChapter.pages.isEmpty;
+    final beforeHrefs = needsChapterFixup
+        ? _chapters!.expand((c) => c.pages).map((p) => p.href).toSet()
+        : const <String>{};
+
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AddRecipeScreen(
@@ -307,8 +323,32 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
     );
     if (!mounted) return;
     ref.invalidate(epubPagesProvider);
-    final pages = await ref.read(epubPagesProvider.future);
+    var pages = await ref.read(epubPagesProvider.future);
     if (!mounted) return;
+
+    if (needsChapterFixup) {
+      final newPages =
+          pages.where((p) => !beforeHrefs.contains(p.href)).toList();
+      if (newPages.length == 1) {
+        final newPage = newPages.first;
+        final rebuilt = _buildChapters(pages);
+        final hostIdx = rebuilt
+            .indexWhere((c) => c.pages.any((p) => p.href == newPage.href));
+        if (hostIdx >= 0) {
+          rebuilt[hostIdx].pages.removeWhere((p) => p.href == newPage.href);
+          rebuilt.insert(hostIdx + 1,
+              EpubChapter(title: targetChapter.title, pages: [newPage]));
+          _chapters = rebuilt;
+          await _save();
+          if (_error != null) return;
+          if (!mounted) return;
+          ref.invalidate(epubPagesProvider);
+          pages = await ref.read(epubPagesProvider.future);
+          if (!mounted) return;
+        }
+      }
+    }
+
     setState(() {
       _chapters = _buildChapters(pages);
       _saved = false;
@@ -901,7 +941,8 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                       ),
                       _rowActions(
                         onAddRecipe: () => _openRecipeEditor(
-                            insertAfter: _insertionAnchorForChapter(item)),
+                            insertAfter: _insertionAnchorForChapter(item),
+                            targetChapter: item),
                         onAddChapter: () =>
                             _addChapterAfterIndex(_chapters!.indexOf(item)),
                         editTooltip: 'Rename chapter',
@@ -910,13 +951,16 @@ class _ReorderScreenState extends ConsumerState<ReorderScreen> {
                             : null,
                         onImportImage: () => _openRecipeEditor(
                             insertAfter: _startAnchorForChapter(item),
-                            autoImportAction: 'image_pdf'),
+                            autoImportAction: 'image_pdf',
+                            targetChapter: item),
                         onImportWeb: () => _openRecipeEditor(
                             insertAfter: _startAnchorForChapter(item),
-                            autoImportAction: 'web_page'),
+                            autoImportAction: 'web_page',
+                            targetChapter: item),
                         onImportText: () => _openRecipeEditor(
                             insertAfter: _startAnchorForChapter(item),
-                            autoImportAction: 'text'),
+                            autoImportAction: 'text',
+                            targetChapter: item),
                         deleteTooltip: 'Delete chapter',
                         onDelete: item.title != null
                             ? () => _deleteChapter(item)
